@@ -37,23 +37,23 @@ public final class PersistentEntityStores {
     public static PersistentEntityStoreImpl newInstance(@NotNull final PersistentEntityStoreConfig config,
                                                         @NotNull final Environment environment,
                                                         @Nullable final BlobVault blobVault,
-                                                        @NotNull final String name) {
-        return new PersistentEntityStoreImpl(config, environment, blobVault, name);
+                                                        @Nullable final String name) {
+        return new PersistentEntityStoreImpl(config, environment, blobVault, name == null ? DEFAULT_NAME : name);
     }
 
     public static PersistentEntityStoreImpl newInstance(@NotNull final Environment environment,
                                                         @Nullable final BlobVault blobVault,
-                                                        @NotNull final String name) {
+                                                        @Nullable final String name) {
         return newInstance(new PersistentEntityStoreConfig(), environment, blobVault, name);
     }
 
     public static PersistentEntityStoreImpl newInstance(@NotNull final PersistentEntityStoreConfig config,
                                                         @NotNull final Environment environment,
-                                                        @NotNull final String name) {
-        return new PersistentEntityStoreImpl(config, environment, null, name);
+                                                        @Nullable final String name) {
+        return new PersistentEntityStoreImpl(config, environment, null, name == null ? DEFAULT_NAME : name);
     }
 
-    public static PersistentEntityStoreImpl newInstance(@NotNull final Environment environment, @NotNull final String name) {
+    public static PersistentEntityStoreImpl newInstance(@NotNull final Environment environment, @Nullable final String name) {
         return newInstance(environment, null, name);
     }
 
