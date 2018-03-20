@@ -1,6 +1,15 @@
 dependencies {
     compile project(':vfs')
     testCompile project(':utils').sourceSets.test.output
+
+    testCompile 'com.sparkjava:spark-kotlin:1.0.0-alpha'
+    testCompile 'com.sparkjava:spark-core:2.7.2'
+
+    testCompile 'com.fasterxml.jackson.module:jackson-module-kotlin:2.9.2'
+
+    testCompile 'com.squareup.retrofit2:retrofit:2.3.0'
+    testCompile 'com.squareup.retrofit2:converter-jackson:2.3.0'
+
 }
 
 // do not build tests artifact if there is task 'uploadArchives' (fixes XD-406)

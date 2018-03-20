@@ -164,7 +164,7 @@ class FileBasedProcessCoordinator private constructor(
             val raf = RandomAccessFile(file, "rw")
 
             return raf.lockVersion(timeout).use {
-                raf.tryLockEverythingExceptVersion(file, timeout).use {
+                raf.tryLockEverythingExceptVersion(file, timeout)?.use {
                     raf.formatCoordinationFile()
                 }
 
@@ -186,7 +186,7 @@ private fun getSlotBit(slotIndex: Int) = 1L shl slotIndex
 
 private fun RandomAccessFile.lockVersion(timeout: Long = 0) = channel.lock(0L, VERSION_SIZE.toLong(), false, timeout)
 
-private fun RandomAccessFile.tryLockEverythingExceptVersion(file: File, timeout: Long = 0): FileLock {
+private fun RandomAccessFile.tryLockEverythingExceptVersion(file: File, timeout: Long = 0): FileLock? {
     val t: Exception = try {
         return channel.tryLock(VERSION_SIZE.toLong(), Long.MAX_VALUE - VERSION_SIZE, false, timeout)
     } catch (ioe: IOException) {
@@ -376,31 +376,37 @@ private class CoordinationFile(private val file: RandomAccessFile) : AutoCloseab
 }
 
 
-private fun FileChannel.lock(position: Long, size: Long, shared: Boolean, timeout: Long = 0): FileLock {
+private fun FileChannel.lock(position: Long, size: Long, shared: Boolean, timeout: Long = 0): FileLock? {
     return withTimeout(timeout) {
         lock(position, size, shared)
     }
 }
 
-private fun FileChannel.tryLock(position: Long, size: Long, shared: Boolean, timeout: Long = 0): FileLock {
+private fun FileChannel.tryLock(position: Long, size: Long, shared: Boolean, timeout: Long = 0): FileLock? {
     return withTimeout(timeout) {
         tryLock(position, size, shared)
     }
 }
 
-private fun withTimeout(timeout: Long, action: () -> FileLock?): FileLock {
+private fun withTimeout(timeout: Long, action: () -> FileLock?): FileLock? {
     var currentMoment = System.currentTimeMillis()
     val end = currentMoment + timeout
     var result: FileLock? = null
     var ex: Exception? = null
-    while (currentMoment <= end && result == null) {
+    var shouldProceed = true
+    while (currentMoment <= end && shouldProceed) {
         try {
             result = action()
+            ex = null
+            shouldProceed = false
         } catch (e: Exception) {
             ex = e
         }
         Thread.sleep(200)
         currentMoment = System.currentTimeMillis()
     }
-    return result ?: throw (ex ?: OverlappingFileLockException())
+    if (ex != null) {
+        throw ex
+    }
+    return result
 }
