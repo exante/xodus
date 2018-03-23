@@ -299,8 +299,8 @@ public final class Log implements Closeable {
         } else {
             final long oldLastFileAddress = getHighFileAddress();
             final long newLastFileAddress = getFileAddress(highAddress);
-            if (oldLastFileAddress < newLastFileAddress) {
-                for (long i = oldLastFileAddress + fileLengthBound; i <= newLastFileAddress; i += fileLengthBound) {
+            if (oldLastFileAddress <= newLastFileAddress) {
+                for (long i = oldLastFileAddress; i <= newLastFileAddress; i += fileLengthBound) {
                     fileAddresses.add(i);
                 }
             }

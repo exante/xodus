@@ -34,7 +34,7 @@ class ForkedStoreController(private val port: Int) : RemoteProtocol by client(po
         logger.info { builder.command().joinToString(" ") }
         logger.info { "-----------------------------" }
         return builder.start().let {
-            logger.info { "$processName started" }
+            logger.info { "$processName is started" }
             process = it
             it
         }
@@ -45,14 +45,14 @@ class ForkedStoreController(private val port: Int) : RemoteProtocol by client(po
         val start = System.currentTimeMillis()
         var time = start
         while (!started && time <= start + timeout * 1000) {
-            logger.info { "awaiting start of process[:$port]" }
+            logger.info { "awaiting start of $processName" }
             val result = try {
                 healthCheck().execute()
             } catch (e: Exception) {
                 null
             }
             started = result?.let {
-                logger.info { "processName result is ${it.code()}" }
+                logger.info { "$processName result is ${it.code()}" }
                 it.isSuccessful && (it.body()?.ok ?: false)
             } ?: false
             Thread.sleep(500)

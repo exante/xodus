@@ -794,6 +794,8 @@ public class EnvironmentImpl implements Environment {
 
     private void resetHighAddress() {
         log.setHighAddress(coordinator.getHighestRoot(), false);
+//        log.approveHighAddress();
+//        final Pair<MetaTree, Integer> meta = MetaTree.create(this);
         final Pair<MetaTree, Integer> meta =
             MetaTree.loadTree(EnvironmentImpl.this, coordinator.getHighestMetaTreeRoot());
         metaTree = meta.getFirst();

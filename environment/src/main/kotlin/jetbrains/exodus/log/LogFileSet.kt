@@ -51,7 +51,7 @@ internal class LogFileSet(private val fileSize: Long) {
 
     fun contains(fileAddress: Long) = current.contains(fileAddress.addressToKey)
 
-    fun getFilesFrom(fileAddress: Long = 0L): LongIterator =
+    fun getFilesFrom(fileAddress: Long = 0L) =
             object : LongIterator {
                 val it = if (fileAddress == 0L) current.longIterator() else current.tailLongIterator(fileAddress.addressToKey)
 

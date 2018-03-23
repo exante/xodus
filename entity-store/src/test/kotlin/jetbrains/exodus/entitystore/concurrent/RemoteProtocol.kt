@@ -25,10 +25,6 @@ object JsonTransformer : ResponseTransformer {
     }
 }
 
-
-const val json = "application/json"
-
-
 interface RemoteProtocol {
 
     @POST("/bind")
@@ -77,6 +73,8 @@ data class EntityLinkVO(
 
 object RemoteStoreProtocolImpl {
 
+    const val json = "application/json"
+
     lateinit var storeService: StoreService
 
     fun registerRouting(http: Http) {
@@ -105,7 +103,7 @@ object RemoteStoreProtocolImpl {
     }
 
     private fun Http.safePost(path: String = "", executor: RouteHandler.() -> Any) {
-        post(path) {
+        post(path, json) {
             response.type(json)
             JsonTransformer.render(executor())
         }
@@ -121,7 +119,7 @@ object RemoteStoreProtocolImpl {
 
 }
 
-class StoreService(location: String, key: String?) {
+class StoreService(location: String, key: String?, readonly: Boolean = false) {
 
     companion object : KLogging()
 
@@ -129,7 +127,7 @@ class StoreService(location: String, key: String?) {
 
     init {
         try {
-            val config = EnvironmentConfig()
+            val config = EnvironmentConfig().setEnvIsReadonly(readonly)
             val environment = Environments.newInstance(location, config)
             store = key.let {
                 if (it == null) {
@@ -178,6 +176,8 @@ class StoreService(location: String, key: String?) {
             }
         }
     }
+
+    val entityTypes: List<String> get() = store.transactional { it.entityTypes }
 
     private fun String.asId(): EntityId {
         return PersistentEntityId.toEntityId(this)

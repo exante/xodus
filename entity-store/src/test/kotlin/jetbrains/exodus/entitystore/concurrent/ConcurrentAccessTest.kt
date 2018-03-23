@@ -1,6 +1,7 @@
 package jetbrains.exodus.entitystore.concurrent
 
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -10,8 +11,6 @@ class ConcurrentAccessTest {
 
     //TODO check port before use
     private val storeController1 = ForkedStoreController(28080)
-    private val storeController2 = ForkedStoreController(28081)
-
 
     private val sharedLocation = newLocation()
 
@@ -28,33 +27,31 @@ class ConcurrentAccessTest {
             assertTrue(isSuccessful)
             assertTrue(body()!!.ok)
         }
-        with(storeController1.newEntity(
+        val newEntity = storeController1.newEntity(
                 EntityVO(
                         type = "Type",
                         properties = listOf(EntityPropertyVO("name", "john")),
                         links = emptyList()
                 )
-        ).execute()) {
+        ).execute()
+
+        with(newEntity) {
             assertTrue(isSuccessful)
         }
 
-
-        storeController2.also {
-            it.launch()
-            it.awaitStart()
+        with(StoreService(sharedLocation, null, true)) {
+            assertEquals(listOf("Type"), entityTypes)
         }
-        val bind2 = storeController2.bind(storeVO).execute()
-        assertTrue(bind2.isSuccessful)
     }
 
     @After
     fun start() {
         storeController1.process?.destroy()
-        storeController2.process?.destroy()
-        File(sharedLocation).delete()
+        println(sharedLocation)
+//        File(sharedLocation).delete()
     }
 
     private fun newLocation(): String {
-        return System.getProperty("java.io.tmpdir") + File.separator + Random().nextLong()
+        return File(System.getProperty("java.io.tmpdir"), Random().nextLong().toString()).absolutePath
     }
 }
