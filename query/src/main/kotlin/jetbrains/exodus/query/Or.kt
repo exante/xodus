@@ -15,10 +15,9 @@
  */
 package jetbrains.exodus.query
 
-import jetbrains.exodus.entitystore.*
-import jetbrains.exodus.entitystore.iterate.EntityIdSet
+import jetbrains.exodus.entitystore.Entity
+import jetbrains.exodus.entitystore.iterate.EntityIdSetIterable
 import jetbrains.exodus.entitystore.iterate.EntityIterableBase
-import jetbrains.exodus.entitystore.util.EntityIdSetFactory
 import jetbrains.exodus.query.metadata.ModelMetaData
 
 @Suppress("EqualsOrHashCode")
@@ -30,9 +29,11 @@ class Or(left: NodeBase, right: NodeBase) : CommutativeOperator(left, right) {
         if (!analyzed && depth >= Utils.reduceUnionsOfLinksDepth) {
             val linkNames = HashSet<String>()
             val txn = queryEngine.persistentStore.andCheckCurrentTransaction
-            val ids = TargetsIterable(txn)
+            val ids = EntityIdSetIterable(txn)
             if (isUnionOfLinks(linkNames, ids)) {
-                return queryEngine.adjustEntityIterable((txn.getAll(entityType) as EntityIterableBase).findLinks(ids, linkNames.first()))
+                val all = txn.getAll(entityType) as EntityIterableBase
+                val cached = txn.getStickyObjectSafe(all.handle) as? EntityIterableBase
+                return queryEngine.adjustEntityIterable((cached ?: all).findLinks(ids, linkNames.first()))
             }
         }
         return queryEngine.unionAdjusted(left.instantiate(entityType, queryEngine, metaData), right.instantiate(entityType, queryEngine, metaData))
@@ -57,46 +58,27 @@ class Or(left: NodeBase, right: NodeBase) : CommutativeOperator(left, right) {
         return "or"
     }
 
-    private fun isUnionOfLinks(linkNames: MutableSet<String>, targets: TargetsIterable): Boolean {
+    private fun isUnionOfLinks(linkNames: MutableSet<String>, entityIdSet: EntityIdSetIterable): Boolean {
         if (analyzed) return false
         analyzed = true
         val left = left
         if (left is Or) {
-            if (!left.isUnionOfLinks(linkNames, targets)) return false
+            if (!left.isUnionOfLinks(linkNames, entityIdSet)) return false
         } else if (left is LinkEqual) {
             linkNames.add(left.name)
-            targets.addTarget(left.toId)
+            entityIdSet.addTarget(left.toId)
         } else {
             return false
         }
         val right = right
         if (right is Or) {
-            if (!right.isUnionOfLinks(linkNames, targets)) return false
+            if (!right.isUnionOfLinks(linkNames, entityIdSet)) return false
         } else if (right is LinkEqual) {
             linkNames.add(right.name)
-            targets.addTarget(right.toId)
+            entityIdSet.addTarget(right.toId)
         } else {
             return false
         }
         return linkNames.size == 1
-    }
-}
-
-private class TargetsIterable(txn: PersistentStoreTransaction) : EntityIterableBase(txn) {
-
-    var ids: EntityIdSet = EntityIdSetFactory.newSet()
-
-    override fun getIteratorImpl(txn: PersistentStoreTransaction): EntityIterator {
-        throw NotImplementedError()
-    }
-
-    override fun getHandleImpl(): EntityIterableHandle {
-        throw NotImplementedError()
-    }
-
-    override fun toSet(txn: PersistentStoreTransaction) = ids
-
-    fun addTarget(id: EntityId) {
-        ids = ids.add(id)
     }
 }
