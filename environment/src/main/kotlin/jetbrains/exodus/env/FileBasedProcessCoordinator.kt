@@ -36,7 +36,9 @@ private const val UNUSED = -1L
 
 // The offsets should be 4-byte aligned for volatile reads/writes
 private const val VERSION_SIZE = 4
-private const val WRITER_LOCK_OFFSET = VERSION_SIZE
+private const val LOCK_TYPE_OFFSET = VERSION_SIZE
+private const val LOCK_TYPE_SIZE = 4
+private const val WRITER_LOCK_OFFSET = LOCK_TYPE_OFFSET + LOCK_TYPE_SIZE
 private const val WRITER_LOCK_SIZE = 4
 private const val HIGHEST_ROOT_OFFSET = WRITER_LOCK_OFFSET + WRITER_LOCK_SIZE
 private const val HIGHEST_ROOT_SIZE = 8
@@ -60,6 +62,8 @@ class FileBasedProcessCoordinator private constructor(
     private var exclusive = false
 
     override fun tryAcquireWriterLock() = file.writerLock.tryAcquire()
+
+    override val lockType by lazy { file.lockType.asLockType() }
 
     override var highestRoot: Long?
         get() = file.highestRoot.takeUnless { it == UNUSED }
@@ -163,26 +167,17 @@ class FileBasedProcessCoordinator private constructor(
             }
             val file = File(databaseLocation, FILE_NAME)
             val raf = RandomAccessFile(file, "rw")
-            val lockType = when (storeLockType) {
-                0 -> StoreLockType.EXCLUSIVE
-                1 -> StoreLockType.READ_ONLY
-                2 -> StoreLockType.READ_WRITE
-                else -> StoreLockType.EXCLUSIVE
-            }
 
-            return raf.lockVersion(timeout).use {
-                raf.tryLockEverythingExceptVersion(file, timeout)?.use {
-                    raf.formatCoordinationFile()
-                }
-
+            return raf.lockFileMeta(timeout).use {
+                raf.tryLockEverythingExceptMeta(file, timeout)?.use { raf.formatCoordinationFile(storeLockType) }
                 raf.checkCoordinationFileFormat()
 
                 val coordinationFile = CoordinationFile(raf)
-
                 FileBasedProcessCoordinator(coordinationFile, slotIndex = coordinationFile.reserveSlot())
             }
         }
     }
+
 }
 
 private val SLOTS = 0 until NUM_SLOTS
@@ -191,11 +186,11 @@ private fun getSlotOffset(slotIndex: Int) = SLOTS_OFFSET + slotIndex * SLOT_SIZE
 
 private fun getSlotBit(slotIndex: Int) = 1L shl slotIndex
 
-private fun RandomAccessFile.lockVersion(timeout: Long = 0) = channel.lock(0L, VERSION_SIZE.toLong(), false, timeout)
+private fun RandomAccessFile.lockFileMeta(timeout: Long = 0) = channel.lock(0L, WRITER_LOCK_OFFSET.toLong(), false, timeout)
 
-private fun RandomAccessFile.tryLockEverythingExceptVersion(file: File, timeout: Long = 0): FileLock? {
+private fun RandomAccessFile.tryLockEverythingExceptMeta(file: File, timeout: Long = 0): FileLock? {
     val t: Exception = try {
-        return channel.tryLock(VERSION_SIZE.toLong(), Long.MAX_VALUE - VERSION_SIZE, false, timeout)
+        return channel.tryLock(WRITER_LOCK_OFFSET.toLong(), Long.MAX_VALUE - WRITER_LOCK_OFFSET, false, timeout)
     } catch (ioe: IOException) {
         ioe
     } catch (ofle: OverlappingFileLockException) {
@@ -207,9 +202,10 @@ private fun RandomAccessFile.tryLockEverythingExceptVersion(file: File, timeout:
     throw ExodusException("Failed to lock file " + file.absolutePath, t)
 }
 
-private fun RandomAccessFile.formatCoordinationFile() {
+private fun RandomAccessFile.formatCoordinationFile(lockType: Int) {
     val buffer = ByteBuffer.allocate(SLOTS_OFFSET).apply {
         putInt(VERSION)
+        putInt(lockType)
         putInt(0) // writer lock
         putLong(UNUSED) // highest root
         putLong(UNUSED) // highest meta tree root
@@ -241,6 +237,14 @@ private class CoordinationFile(private val file: RandomAccessFile) : AutoCloseab
 
     val writerLock = ReentrantFileLock(WRITER_LOCK_OFFSET, WRITER_LOCK_SIZE)
     val highestRootLock = ReentrantFileLock(HIGHEST_ROOT_OFFSET, HIGHEST_ROOT_SIZE)
+
+    val lockType = file.let {
+        file.seek(0)
+        file.readInt()
+        file.readInt().also {
+            file.seek(0)
+        }
+    }
 
     val lowestUsedRootAndReservedSlotBitsetLock =
             ReentrantFileLock(LOWEST_USED_ROOT_OFFSET, LOWEST_USED_ROOT_SIZE + RESERVED_SLOT_BITSET_SIZE)

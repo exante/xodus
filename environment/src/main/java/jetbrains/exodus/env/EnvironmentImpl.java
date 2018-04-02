@@ -121,12 +121,8 @@ public class EnvironmentImpl implements Environment {
                         metaTree = meta.getFirst();
                         structureId.set(meta.getSecond());
                     } else {
+                        coordinator.assertAccess(ec.getEnvIsReadonly());
                         resetHighAddress();
-                    }
-                    if (!ec.getEnvIsReadonly()) {
-                        if (!coordinator.tryAcquireWriterLock()) {
-                            throw new ExodusException(getLocation() + ": unable to acquire writer lock");
-                        }
                     }
                     return Unit.INSTANCE;
                 }

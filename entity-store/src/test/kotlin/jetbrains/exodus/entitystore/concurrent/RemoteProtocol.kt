@@ -21,6 +21,7 @@ import com.fasterxml.jackson.module.kotlin.KotlinModule
 import jetbrains.exodus.entitystore.*
 import jetbrains.exodus.env.EnvironmentConfig
 import jetbrains.exodus.env.Environments
+import jetbrains.exodus.env.StoreLockType
 import mu.KLogging
 import retrofit2.Call
 import retrofit2.http.*
@@ -61,6 +62,7 @@ interface RemoteProtocol {
 
 data class RemoteStoreVO(
         val location: String,
+        val lockType: StoreLockType = StoreLockType.EXCLUSIVE,
         val key: String? = null
 )
 
@@ -95,7 +97,7 @@ object RemoteStoreProtocolImpl {
     fun registerRouting(http: Http) {
         http.safePost("/bind") {
             val store = mapper.readValue(request.body(), RemoteStoreVO::class.java)
-            storeService = StoreService(store.location, store.key)
+            storeService = StoreService(store.location, store.key, store.lockType)
             store
         }
         http.safePost("/types") {
@@ -134,7 +136,7 @@ object RemoteStoreProtocolImpl {
 
 }
 
-class StoreService(location: String, key: String?, readonly: Boolean = false) {
+class StoreService(location: String, key: String?, lockType: StoreLockType, readonly: Boolean = false) {
 
     companion object : KLogging()
 
@@ -142,7 +144,7 @@ class StoreService(location: String, key: String?, readonly: Boolean = false) {
 
     init {
         try {
-            val config = EnvironmentConfig().setEnvIsReadonly(readonly)
+            val config = EnvironmentConfig().setEnvIsReadonly(readonly).setLogLockType(lockType.code)
             val environment = Environments.newInstance(location, config)
             store = key.let {
                 if (it == null) {

@@ -89,7 +89,6 @@ public final class Log implements Closeable {
 
     public Log(@NotNull final LogConfig config, @NotNull ProcessCoordinator coordinator) {
         this.config = config;
-        tryLock(this.coordinator = coordinator);
 
         created = System.currentTimeMillis();
         fileSize = config.getFileSize();
@@ -103,6 +102,7 @@ public final class Log implements Closeable {
         reader = config.getReader();
         reader.setLog(this);
         location = reader.getLocation();
+        this.coordinator = coordinator;
 
         newFileListeners = new ArrayList<>(2);
         readBytesListeners = new ArrayList<>(2);

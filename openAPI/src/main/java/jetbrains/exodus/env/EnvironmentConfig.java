@@ -860,15 +860,26 @@ public final class EnvironmentConfig extends AbstractConfig {
     }
 
     /**
-     * Sets the debug identifier to be written to the lock file alongside with other debug information.
-     * Default value is {@code ManagementFactory.getRuntimeMXBean().getName()} which has a form of {@code pid@hostname}.
-     * <p>Mutable at runtime: no
+     * Gets log lock type
+     * If is set to {@code 0} then {@linkplain Environment} has exclusive rights to work with this store.
      *
-     * @return the debug identifier to be written to the lock file alongside with other debug information
-     * or null if the default value is used
+     * <p>If is set to {@code 1} then {@linkplain Environment} has exclusive rights to write to store and
+     * allow other processes to open store in readonly way.
+     *
+     * <p>If is set to {@code 2} then {@linkplain Environment} allow concurrent read.
+     * @return integer code representing log lock type
      */
     public int getLogLockType() {
         return (int) getSetting(LOG_LOCK_TYPE);
+    }
+    /**
+     * Sets the log lock type
+     *
+     * @param lockType int representing log lock type
+     * @return this {@code EnvironmentConfig} instance
+     */
+    public EnvironmentConfig setLogLockType(final int lockType) {
+        return setSetting(LOG_LOCK_TYPE, lockType);
     }
 
     /**

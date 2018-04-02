@@ -17,6 +17,8 @@ package jetbrains.exodus.env
 
 interface ProcessCoordinator : AutoCloseable {
     var highestRoot: Long?
+    val lockType: StoreLockType
+
     var highestMetaTreeRoot: Long?
     val lowestUsedRoot: Long?
     var localLowestUsedRoot: Long?
@@ -28,13 +30,24 @@ interface ProcessCoordinator : AutoCloseable {
     fun withExclusiveLock(action: () -> Unit): Boolean
 
     override fun close()
+
+    fun assertAccess(readonly: Boolean) {
+        if (lockType == StoreLockType.EXCLUSIVE) {
+            throw SharedAccessException("database is locked exclusively")
+        } else if (lockType == StoreLockType.ALLOW_READ && !readonly) {
+            throw SharedAccessException("database can be accessed only for read-only environments")
+        }
+    }
 }
 
 
-enum class StoreLockType {
+enum class StoreLockType(val code: Int) {
 
-    EXCLUSIVE,
-    READ_ONLY,
-    READ_WRITE
+    EXCLUSIVE(0),
+    ALLOW_READ(1),
+    ALLOW_READ_WRITE(2)
 
 }
+
+fun Int.asLockType() = StoreLockType.values().firstOrNull{this == it.code} ?: StoreLockType.EXCLUSIVE
+

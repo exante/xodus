@@ -18,6 +18,7 @@ package jetbrains.exodus.env
 class DummyProcessCoordinator : ProcessCoordinator {
     @Volatile override var highestRoot: Long? = null
     @Volatile override var highestMetaTreeRoot: Long? = null
+    override val lockType = StoreLockType.EXCLUSIVE
     override val lowestUsedRoot: Long? get() = localLowestUsedRoot
     @Volatile override var localLowestUsedRoot: Long? = null
 

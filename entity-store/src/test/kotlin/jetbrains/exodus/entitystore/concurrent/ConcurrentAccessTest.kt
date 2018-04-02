@@ -15,34 +15,38 @@
  */
 package jetbrains.exodus.entitystore.concurrent
 
+import jetbrains.exodus.env.SharedAccessException
+import jetbrains.exodus.env.StoreLockType
 import org.junit.After
+import org.junit.Assert
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.util.*
+import kotlin.reflect.KClass
 
 class ConcurrentAccessTest {
 
     //TODO check port before use
-    private val storeController1 = ForkedStoreController(28080)
+    private val storeController = ForkedStoreController(28080)
 
     private val sharedLocation = newLocation()
 
     @Test
     fun `sharing database between two processes`() {
-        storeController1.also {
+        storeController.also {
             it.launch()
             it.awaitStart()
         }
-        val storeVO = RemoteStoreVO(sharedLocation)
-        val bind1 = storeController1.bind(storeVO).execute()
+        val storeVO = RemoteStoreVO(sharedLocation, StoreLockType.ALLOW_READ_WRITE)
+        val bind1 = storeController.bind(storeVO).execute()
         assertTrue(bind1.isSuccessful)
-        with(storeController1.newType("Type").execute()) {
+        with(storeController.newType("Type").execute()) {
             assertTrue(isSuccessful)
             assertTrue(body()!!.ok)
         }
-        val newEntity = storeController1.newEntity(
+        val newEntity = storeController.newEntity(
                 EntityVO(
                         type = "Type",
                         properties = listOf(EntityPropertyVO("name", "john")),
@@ -54,16 +58,60 @@ class ConcurrentAccessTest {
             assertTrue(isSuccessful)
         }
 
-        with(StoreService(sharedLocation, null, true)) {
+        with(StoreService(sharedLocation, null, StoreLockType.ALLOW_READ_WRITE, true)) {
             assertEquals(listOf("Type"), entityTypes)
+        }
+    }
+
+    @Test
+    fun `EXCLUSIVE lock type should restrict any shared access`() {
+        storeController.also {
+            it.launch()
+            it.awaitStart()
+        }
+        val storeVO = RemoteStoreVO(sharedLocation, StoreLockType.EXCLUSIVE)
+        val bind = storeController.bind(storeVO).execute()
+        assertTrue(bind.isSuccessful)
+
+        assertFail(SharedAccessException::class) {
+            StoreService(sharedLocation, null, StoreLockType.ALLOW_READ, readonly = true)
+        }
+        assertFail(SharedAccessException::class) {
+            StoreService(sharedLocation, null, StoreLockType.ALLOW_READ, readonly = false)
+        }
+    }
+
+    @Test
+    fun `ALLOW_READ lock type should not restrict readonly access`() {
+        storeController.also {
+            it.launch()
+            it.awaitStart()
+        }
+        val storeVO = RemoteStoreVO(sharedLocation, StoreLockType.ALLOW_READ)
+        val bind = storeController.bind(storeVO).execute()
+        assertTrue(bind.isSuccessful)
+
+        assertFail(SharedAccessException::class) {
+            StoreService(sharedLocation, null, StoreLockType.ALLOW_READ, readonly = false)
+        }
+
+//        StoreService(sharedLocation, null, StoreLockType.ALLOW_READ, readonly = true)
+    }
+
+    private fun assertFail(kClass: KClass<out Exception>, function: () -> Unit) {
+        try {
+            function()
+            Assert.fail("expected fails with ${kClass.java}")
+        } catch (e: Exception) {
+            assertEquals(kClass.java, e.javaClass)
         }
     }
 
     @After
     fun start() {
-        storeController1.process?.destroy()
+        storeController.process?.destroy()
         println(sharedLocation)
-//        File(sharedLocation).delete()
+        File(sharedLocation).delete()
     }
 
     private fun newLocation(): String {
