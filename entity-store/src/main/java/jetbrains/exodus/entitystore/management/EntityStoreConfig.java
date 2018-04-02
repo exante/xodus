@@ -234,6 +234,11 @@ public class EntityStoreConfig extends MBeanBase implements EntityStoreConfigMBe
     }
 
     @Override
+    public int getStoreLockType() {
+        return store.getEnvironment().getEnvironmentConfig().getLogLockType();
+    }
+
+    @Override
     public void close() {
         store.close();
         super.close();

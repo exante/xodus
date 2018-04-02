@@ -103,12 +103,11 @@ public class EnvironmentImpl implements Environment {
     private final long cipherBasicIV;
 
     @SuppressWarnings({"ThisEscapedInObjectConstruction"})
-    EnvironmentImpl(@NotNull final Log log, @NotNull final EnvironmentConfig ec,
-                    @NotNull final ProcessCoordinator coordinator) {
+    EnvironmentImpl(@NotNull final Log log, @NotNull final EnvironmentConfig ec) {
         this.log = log;
         this.ec = ec;
         applyEnvironmentSettings(log.getLocation(), ec);
-        this.coordinator = coordinator;
+        this.coordinator = log.getCoordinator();
         structureId = new AtomicInteger();
         try {
             coordinator.withHighestRootLock(new Function0<Unit>() {
@@ -462,7 +461,6 @@ public class EnvironmentImpl implements Environment {
             logger.info("Store get cache hit rate: " + ObjectCacheBase.formatHitRate(storeGetCacheHitRate));
             logger.info("Exodus log cache hit rate: " + ObjectCacheBase.formatHitRate(logCacheHitRate));
         }
-        coordinator.close();
     }
 
     @Override

@@ -99,5 +99,7 @@ public interface EntityStoreConfigMBean {
 
     boolean getGatherStatistics();
 
+    int getStoreLockType();
+
     void close();
 }

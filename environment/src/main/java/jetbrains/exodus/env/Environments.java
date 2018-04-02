@@ -19,7 +19,6 @@ import jetbrains.exodus.crypto.KryptKt;
 import jetbrains.exodus.log.Log;
 import jetbrains.exodus.log.LogConfig;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 
@@ -61,15 +60,7 @@ public final class Environments {
 
     @NotNull
     public static Environment newInstance(@NotNull final LogConfig config, @NotNull final EnvironmentConfig ec) {
-        final ProcessCoordinator coordinator = config.createProcessCoordinator(ec.getLogLockTimeout());
-        return newInstance(config, ec, coordinator);
-    }
-
-    @NotNull
-    public static Environment newInstance(@NotNull final LogConfig config,
-                                          @NotNull final EnvironmentConfig ec,
-                                          @NotNull final ProcessCoordinator coordinator) {
-        return prepare(new EnvironmentImpl(newLogInstance(config, ec, coordinator), ec, coordinator));
+        return prepare(new EnvironmentImpl(newLogInstance(config, ec), ec));
     }
 
     @NotNull
@@ -99,26 +90,18 @@ public final class Environments {
 
     @NotNull
     public static ContextualEnvironment newContextualInstance(@NotNull final LogConfig config, @NotNull final EnvironmentConfig ec) {
-        final ProcessCoordinator coordinator = config.createProcessCoordinator(ec.getLogLockTimeout());
-        return newContextualInstance(config, ec, coordinator);
+        return prepare(new ContextualEnvironmentImpl(newLogInstance(config, ec), ec));
     }
 
-    @NotNull
-    public static ContextualEnvironment newContextualInstance(@NotNull final LogConfig config,
-                                                              @NotNull final EnvironmentConfig ec,
-                                                              @NotNull final ProcessCoordinator coordinator) {
-        return prepare(new ContextualEnvironmentImpl(newLogInstance(config, ec, coordinator), ec, coordinator));
-    }
 
     @NotNull
     public static Log newLogInstance(@NotNull final File dir, @NotNull final EnvironmentConfig ec) {
-        return newLogInstance(new LogConfig().setDir(dir), ec, null);
+        return newLogInstance(new LogConfig().setDir(dir), ec);
     }
 
     @NotNull
     public static Log newLogInstance(@NotNull final LogConfig config,
-                                     @NotNull final EnvironmentConfig ec,
-                                     @Nullable final ProcessCoordinator coordinator) {
+                                     @NotNull final EnvironmentConfig ec) {
         final Long maxMemory = ec.getMemoryUsage();
         if (maxMemory != null) {
             config.setMemoryUsage(maxMemory);
@@ -141,13 +124,14 @@ public final class Environments {
             setFullFileReadonly(ec.isLogFullFileReadonly()).
             setCipherProvider(ec.getCipherId() == null ? null : KryptKt.newCipherProvider(ec.getCipherId())).
             setCipherKey(ec.getCipherKey()).
-            setCipherBasicIV(ec.getCipherBasicIV()), coordinator);
+            setCipherBasicIV(ec.getCipherBasicIV()).
+            setLockType(ec.getLogLockType()));
     }
 
     @NotNull
-    public static Log newLogInstance(@NotNull final LogConfig config, @Nullable final ProcessCoordinator coordinator) {
+    public static Log newLogInstance(@NotNull final LogConfig config) {
         // In order to avoid XD-96, we need to load the DatabaseRoot class before creating Log instance
-        return new Log(config, coordinator);
+        return new Log(config);
     }
 
     @NotNull

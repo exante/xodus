@@ -20,6 +20,7 @@ import jetbrains.exodus.core.dataStructures.Pair;
 import jetbrains.exodus.crypto.KryptKt;
 import jetbrains.exodus.crypto.StreamCipher;
 import jetbrains.exodus.crypto.StreamCipherProvider;
+import jetbrains.exodus.entitystore.PersistentEntityStore;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -137,6 +138,18 @@ public final class EnvironmentConfig extends AbstractConfig {
      * <p>Mutable at runtime: no
      */
     public static final String LOG_LOCK_TIMEOUT = "exodus.log.lockTimeout";
+
+    /**
+     * Defines the type of lock for {@linkplain Environment}
+     *
+     * If is set to {@code 0} then {@linkplain Environment} has exclusive rights to work with this store.
+     *
+     * <p>If is set to {@code 1} then {@linkplain Environment} has exclusive rights to write to store and
+     * allow other processes to open store in readonly way.
+     *
+     * <p>If is set to {@code 2} then {@linkplain Environment} allow concurrent read.
+     */
+    public static final String LOG_LOCK_TYPE = "exodus.log.lockType";
 
     /**
      * Defines the debug identifier to be written to the lock file alongside with other debug information.
@@ -531,6 +544,7 @@ public final class EnvironmentConfig extends AbstractConfig {
             new Pair(LOG_FILE_SIZE, 8192L),
             new Pair(LOG_LOCK_TIMEOUT, 0L),
             new Pair(LOG_LOCK_ID, null),
+            new Pair(LOG_LOCK_TYPE, 0),
             new Pair(LOG_CACHE_PAGE_SIZE, 64 * 1024),
             new Pair(LOG_CACHE_OPEN_FILES, 500),
             new Pair(LOG_CACHE_USE_NIO, true),
@@ -843,6 +857,18 @@ public final class EnvironmentConfig extends AbstractConfig {
      */
     public String getLogLockId() {
         return (String) getSetting(LOG_LOCK_ID);
+    }
+
+    /**
+     * Sets the debug identifier to be written to the lock file alongside with other debug information.
+     * Default value is {@code ManagementFactory.getRuntimeMXBean().getName()} which has a form of {@code pid@hostname}.
+     * <p>Mutable at runtime: no
+     *
+     * @return the debug identifier to be written to the lock file alongside with other debug information
+     * or null if the default value is used
+     */
+    public int getLogLockType() {
+        return (int) getSetting(LOG_LOCK_TYPE);
     }
 
     /**

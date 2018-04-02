@@ -17,6 +17,7 @@ package jetbrains.exodus.tree;
 
 import jetbrains.exodus.*;
 import jetbrains.exodus.bindings.LongBinding;
+import jetbrains.exodus.env.DummyProcessCoordinator;
 import jetbrains.exodus.log.Log;
 import jetbrains.exodus.log.LogConfig;
 import jetbrains.exodus.tree.btree.LeafNodeKV;
@@ -80,7 +81,7 @@ public abstract class TreeBaseTest {
     private void createLog() {
         LogConfig config = createLogConfig();
         config.setDir(tempFolder);
-        log = new Log(config, null);
+        log = new Log(config, new DummyProcessCoordinator());
         log.init();
     }
 

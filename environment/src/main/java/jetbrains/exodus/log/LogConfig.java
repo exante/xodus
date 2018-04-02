@@ -1,12 +1,12 @@
 /**
  * Copyright 2010 - 2018 JetBrains s.r.o.
- *
+ * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -36,6 +36,7 @@ public class LogConfig {
     private File dir;
     private long fileSize;
     private long lockTimeout;
+    private int lockType;
     private String lockId;
     private long memoryUsage;
     private int memoryUsagePercentage;
@@ -83,6 +84,15 @@ public class LogConfig {
 
     public LogConfig setLockTimeout(long lockTimeout) {
         this.lockTimeout = lockTimeout;
+        return this;
+    }
+
+    public int getLockType() {
+        return lockType;
+    }
+
+    public LogConfig setLockType(int lockType) {
+        this.lockType = lockType;
         return this;
     }
 
@@ -284,12 +294,11 @@ public class LogConfig {
         return this;
     }
 
-    @NotNull
-    public ProcessCoordinator createProcessCoordinator(long timeout) {
+    public ProcessCoordinator newProcessCoordinator(long timeout, int logLockType) {
         final DataReader reader = getReader();
         return reader instanceof FileDataReader
-            ? FileBasedProcessCoordinator.Companion.create(((FileDataReader) reader).getDir(), timeout)
-            : new DummyProcessCoordinator();
+                ? FileBasedProcessCoordinator.Companion.create(((FileDataReader) reader).getDir(), logLockType, timeout)
+                : new DummyProcessCoordinator();
     }
 
     public static LogConfig create(@NotNull final DataReader reader, @NotNull final DataWriter writer) {

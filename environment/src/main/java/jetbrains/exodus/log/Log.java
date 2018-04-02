@@ -1,12 +1,12 @@
 /**
  * Copyright 2010 - 2018 JetBrains s.r.o.
- *
+ * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -47,8 +47,8 @@ public final class Log implements Closeable {
 
     @NotNull
     private final LogConfig config;
-    @Nullable
-    private final ProcessCoordinator ownProcessCoordinator;
+    @NotNull
+    private final ProcessCoordinator coordinator;
     private final long created;
     @NotNull
     private final String location;
@@ -87,14 +87,10 @@ public final class Log implements Closeable {
     @Nullable
     private LogTestConfig testConfig;
 
-    public Log(@NotNull final LogConfig config,
-               @Nullable final ProcessCoordinator coordinator) {
+    public Log(@NotNull final LogConfig config, @NotNull ProcessCoordinator coordinator) {
         this.config = config;
-        if (coordinator != null) {
-            ownProcessCoordinator = null;
-        } else {
-            tryLock(ownProcessCoordinator = config.createProcessCoordinator(config.getLockTimeout()));
-        }
+        tryLock(this.coordinator = coordinator);
+
         created = System.currentTimeMillis();
         fileSize = config.getFileSize();
         cachePageSize = config.getCachePageSize();
@@ -115,13 +111,13 @@ public final class Log implements Closeable {
         final boolean nonBlockingCache = config.isNonBlockingCache();
         if (memoryUsage != 0) {
             cache = config.isSharedCache() ?
-                getSharedCache(memoryUsage, cachePageSize, nonBlockingCache) :
-                new SeparateLogCache(memoryUsage, cachePageSize, nonBlockingCache);
+                    getSharedCache(memoryUsage, cachePageSize, nonBlockingCache) :
+                    new SeparateLogCache(memoryUsage, cachePageSize, nonBlockingCache);
         } else {
             final int memoryUsagePercentage = config.getMemoryUsagePercentage();
             cache = config.isSharedCache() ?
-                getSharedCache(memoryUsagePercentage, cachePageSize, nonBlockingCache) :
-                new SeparateLogCache(memoryUsagePercentage, cachePageSize, nonBlockingCache);
+                    getSharedCache(memoryUsagePercentage, cachePageSize, nonBlockingCache) :
+                    new SeparateLogCache(memoryUsagePercentage, cachePageSize, nonBlockingCache);
         }
         DeferredIO.getJobProcessor();
         isClosing = false;
@@ -129,6 +125,10 @@ public final class Log implements Closeable {
         approvedHighAddress = 0;
 
         setBufferedWriter(createEmptyBufferedWriter(config.getWriter()));
+    }
+
+    public Log(@NotNull final LogConfig config) {
+        this(config, config.newProcessCoordinator(config.getLockTimeout(), config.getLockType()));
     }
 
     public void init() {
@@ -143,7 +143,7 @@ public final class Log implements Closeable {
             final long highPageAddress = getHighPageAddress();
             final byte[] highPageContent = new byte[cachePageSize];
             setBufferedWriter(createBufferedWriter(baseWriter, highPageAddress,
-                highPageContent, highAddress == 0 ? 0 : readBytes(highPageContent, highPageAddress)));
+                    highPageContent, highAddress == 0 ? 0 : readBytes(highPageContent, highPageAddress)));
             // here we should check whether last loggable is written correctly
             final Iterator<RandomAccessLoggable> lastFileLoggables = new LoggableIterator(this, lastFileAddress);
             long approvedHighAddress = lastFileAddress;
@@ -190,10 +190,10 @@ public final class Log implements Closeable {
             if (clearLogReason == null && address != getFileAddress(address)) {
                 if (!config.isClearInvalidLog()) {
                     throw new ExodusException("Unexpected file address " +
-                        LogUtil.getLogFilename(address) + LogUtil.getWrongAddressErrorMessage(address, fileSize));
+                            LogUtil.getLogFilename(address) + LogUtil.getWrongAddressErrorMessage(address, fileSize));
                 }
                 clearLogReason = "Unexpected file address " +
-                    LogUtil.getLogFilename(address) + LogUtil.getWrongAddressErrorMessage(address, fileSize);
+                        LogUtil.getLogFilename(address) + LogUtil.getWrongAddressErrorMessage(address, fileSize);
             }
             if (clearLogReason != null) {
                 if (!config.isClearInvalidLog()) {
@@ -211,6 +211,11 @@ public final class Log implements Closeable {
     @NotNull
     public LogConfig getConfig() {
         return config;
+    }
+
+    @NotNull
+    public ProcessCoordinator getCoordinator() {
+        return coordinator;
     }
 
     public long getCreated() {
@@ -474,7 +479,7 @@ public final class Log implements Closeable {
         final long dataAddress = it.getHighAddress();
         if (dataLength > 0 && it.availableInCurrentPage(dataLength)) {
             return new RandomAccessLoggableAndArrayByteIterable(
-                address, type, structureId, dataAddress, it.getCurrentPage(), it.getOffset(), dataLength);
+                    address, type, structureId, dataAddress, it.getCurrentPage(), it.getOffset(), dataLength);
         }
         final RandomAccessByteIterable data = new RandomAccessByteIterable(dataAddress, this);
         return new RandomAccessLoggableImpl(address, type, data, dataLength, structureId);
@@ -645,9 +650,7 @@ public final class Log implements Closeable {
         reader.close();
         bufferedWriter.close();
         fileAddresses.clear();
-        if (ownProcessCoordinator != null) {
-            ownProcessCoordinator.close();
-        }
+        coordinator.close();
     }
 
     public boolean isClosing() {
@@ -773,7 +776,7 @@ public final class Log implements Closeable {
                 final StreamCipherProvider cipherProvider = config.getCipherProvider();
                 if (cipherProvider != null) {
                     EnvKryptKt.cryptBlocksMutable(cipherProvider, config.getCipherKey(), config.getCipherBasicIV(),
-                        address, output, 0, readBytes, LogUtil.LOG_BLOCK_ALIGNMENT);
+                            address, output, 0, readBytes, LogUtil.LOG_BLOCK_ALIGNMENT);
                 }
                 notifyReadBytes(output, readBytes);
                 return readBytes;
@@ -832,7 +835,7 @@ public final class Log implements Closeable {
     private static void checkCachePageSize(final int pageSize, @NotNull final LogCache result) {
         if (result.pageSize != pageSize) {
             throw new ExodusException("SharedLogCache was created with page size " + result.pageSize +
-                " and then requested with page size " + pageSize + ". EnvironmentConfig.LOG_CACHE_PAGE_SIZE was set manually.");
+                    " and then requested with page size " + pageSize + ". EnvironmentConfig.LOG_CACHE_PAGE_SIZE was set manually.");
         }
     }
 

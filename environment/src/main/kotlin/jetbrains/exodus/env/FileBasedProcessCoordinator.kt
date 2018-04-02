@@ -154,7 +154,8 @@ class FileBasedProcessCoordinator private constructor(
     }
 
     companion object {
-        fun create(databaseLocation: File, timeout: Long = 0): FileBasedProcessCoordinator {
+
+        fun create(databaseLocation: File, storeLockType: Int, timeout: Long = 0): FileBasedProcessCoordinator {
             if (!databaseLocation.exists()) {
                 if (!databaseLocation.mkdirs()) {
                     throw ExodusException("Cannot create database directory: " + databaseLocation)
@@ -162,6 +163,12 @@ class FileBasedProcessCoordinator private constructor(
             }
             val file = File(databaseLocation, FILE_NAME)
             val raf = RandomAccessFile(file, "rw")
+            val lockType = when (storeLockType) {
+                0 -> StoreLockType.EXCLUSIVE
+                1 -> StoreLockType.READ_ONLY
+                2 -> StoreLockType.READ_WRITE
+                else -> StoreLockType.EXCLUSIVE
+            }
 
             return raf.lockVersion(timeout).use {
                 raf.tryLockEverythingExceptVersion(file, timeout)?.use {

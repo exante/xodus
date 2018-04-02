@@ -29,3 +29,12 @@ interface ProcessCoordinator : AutoCloseable {
 
     override fun close()
 }
+
+
+enum class StoreLockType {
+
+    EXCLUSIVE,
+    READ_ONLY,
+    READ_WRITE
+
+}

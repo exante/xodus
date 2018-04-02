@@ -18,6 +18,7 @@ package jetbrains.exodus.log;
 import jetbrains.exodus.ArrayByteIterable;
 import jetbrains.exodus.TestUtil;
 import jetbrains.exodus.core.dataStructures.Pair;
+import jetbrains.exodus.env.DummyProcessCoordinator;
 import jetbrains.exodus.io.DataReader;
 import jetbrains.exodus.io.DataWriter;
 import jetbrains.exodus.io.FileDataReader;
@@ -80,7 +81,7 @@ class LogTestsBase {
                 if (log == null) {
                     config.setReader(reader);
                     config.setWriter(writer);
-                    log = new Log(config, null);
+                    log = new Log(config, new DummyProcessCoordinator());
                 }
             }
         }
@@ -90,7 +91,7 @@ class LogTestsBase {
         if (log == null) {
             synchronized (this) {
                 if (log == null) {
-                    log = new Log(LogConfig.create(reader, writer), null);
+                    log = new Log(LogConfig.create(reader, writer), new DummyProcessCoordinator());
                 }
             }
         }
