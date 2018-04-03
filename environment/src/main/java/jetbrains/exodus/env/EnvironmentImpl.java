@@ -68,7 +68,7 @@ public class EnvironmentImpl implements Environment {
     private final ProcessCoordinator coordinator;
     @NotNull
     private final TransactionSet txns;
-    private final LinkedList<RunnableWithTxnHighAddress> txnSafeTasks;
+    private final LinkedList<RunnableWithTxnRoot> txnSafeTasks;
     @Nullable
     private StoreGetCache storeGetCache;
     private final EnvironmentSettingsListener envSettingsListener;
@@ -108,7 +108,10 @@ public class EnvironmentImpl implements Environment {
         this.log = log;
         this.ec = ec;
         applyEnvironmentSettings(log.getLocation(), ec);
-        final Pair<MetaTree, Integer> meta = MetaTree.create(this);
+        final Pair<MetaTree, Integer> meta;
+        synchronized (commitLock) {
+            meta = MetaTree.create(this);
+        }
         metaTree = meta.getFirst();
         structureId = new AtomicInteger(meta.getSecond());
         txns = new TransactionSet();
@@ -117,44 +120,41 @@ public class EnvironmentImpl implements Environment {
         envSettingsListener = new EnvironmentSettingsListener();
         ec.addChangedSettingsListener(envSettingsListener);
 
-            gc = new GarbageCollector(this);
+        gc = new GarbageCollector(this);
 
-            ReentrantReadWriteLock metaLock = new ReentrantReadWriteLock();
-            metaReadLock = metaLock.readLock();
-            metaWriteLock = metaLock.writeLock();
+        ReentrantReadWriteLock metaLock = new ReentrantReadWriteLock();
+        metaReadLock = metaLock.readLock();
+        metaWriteLock = metaLock.writeLock();
 
-            txnDispatcher = new ReentrantTransactionDispatcher(ec.getEnvMaxParallelTxns());
-            roTxnDispatcher = new ReentrantTransactionDispatcher(ec.getEnvMaxParallelReadonlyTxns());
+        txnDispatcher = new ReentrantTransactionDispatcher(ec.getEnvMaxParallelTxns());
+        roTxnDispatcher = new ReentrantTransactionDispatcher(ec.getEnvMaxParallelReadonlyTxns());
 
-            statistics = new EnvironmentStatistics(this);
-            if (ec.isManagementEnabled()) {
-                configMBean = ec.getManagementOperationsRestricted() ?
+        statistics = new EnvironmentStatistics(this);
+        if (ec.isManagementEnabled()) {
+            configMBean = ec.getManagementOperationsRestricted() ?
                     new jetbrains.exodus.env.management.EnvironmentConfig(this) :
                     new EnvironmentConfigWithOperations(this);
-                // if we don't gather statistics then we should not expose corresponding managed bean
-                statisticsMBean = ec.getEnvGatherStatistics() ? new jetbrains.exodus.env.management.EnvironmentStatistics(this) : null;
-            } else {
-                configMBean = null;
-                statisticsMBean = null;
-            }
-
-            throwableOnCommit = null;
-            throwableOnClose = null;
-
-            stuckTxnMonitor = (transactionTimeout() > 0) ? new StuckTransactionMonitor(this) : null;
-
-            final LogConfig logConfig = log.getConfig();
-            streamCipherProvider = logConfig.getCipherProvider();
-            cipherKey = logConfig.getCipherKey();
-            cipherBasicIV = logConfig.getCipherBasicIV();
-
-            if (logger.isInfoEnabled()) {
-                logger.info("Exodus environment created: " + log.getLocation());
-            }
-        } catch (Throwable e) {
-            coordinator.close();
-            throw e;
+            // if we don't gather statistics then we should not expose corresponding managed bean
+            statisticsMBean = ec.getEnvGatherStatistics() ? new jetbrains.exodus.env.management.EnvironmentStatistics(this) : null;
+        } else {
+            configMBean = null;
+            statisticsMBean = null;
         }
+
+        throwableOnCommit = null;
+        throwableOnClose = null;
+
+        stuckTxnMonitor = (transactionTimeout() > 0) ? new StuckTransactionMonitor(this) : null;
+
+        final LogConfig logConfig = log.getConfig();
+        streamCipherProvider = logConfig.getCipherProvider();
+        cipherKey = logConfig.getCipherKey();
+        cipherBasicIV = logConfig.getCipherBasicIV();
+
+        if (logger.isInfoEnabled()) {
+            logger.info("Exodus environment created: " + log.getLocation());
+        }
+        coordinator = log.getCoordinator();
     }
 
     @Override
@@ -300,12 +300,12 @@ public class EnvironmentImpl implements Environment {
 
     @Override
     public void executeTransactionSafeTask(@NotNull final Runnable task) {
-        final long newestTxnHighAddress = txns.getNewestTxnHighAddress();
-        if (newestTxnHighAddress == Long.MIN_VALUE) {
+        final long newestTxnRoot = txns.getNewestTxnHighAddress();
+        if (newestTxnRoot == Long.MIN_VALUE) {
             task.run();
         } else {
             synchronized (txnSafeTasks) {
-                txnSafeTasks.addLast(new RunnableWithTxnHighAddress(task, newestTxnHighAddress));
+                txnSafeTasks.addLast(new RunnableWithTxnRoot(task, newestTxnRoot));
             }
         }
     }
@@ -333,9 +333,6 @@ public class EnvironmentImpl implements Environment {
 
     @Override
     public void clear() {
-        if (ec.getEnvIsReadonly()) {
-            throw new ReadonlyTransactionException("Can't clear read-only environment");
-        }
         final Thread currentThread = Thread.currentThread();
         if (txnDispatcher.getThreadPermits(currentThread) != 0 || roTxnDispatcher.getThreadPermits(currentThread) != 0) {
             throw new ExodusException("Environment.clear() can't proceed if there is a transaction in current thread");
@@ -363,7 +360,7 @@ public class EnvironmentImpl implements Environment {
                                     final Pair<MetaTree, Integer> meta = MetaTree.create(EnvironmentImpl.this);
                                     metaTree = meta.getFirst();
                                     structureId.set(meta.getSecond());
-                                    coordinator.setHighestRoot(log.approveHighAddress());
+                                    coordinator.setHighestRoot(log.getTip().approvedHighAddress);
                                     coordinator.setHighestMetaTreeRoot(metaTree.root);
                                     return Unit.INSTANCE;
                                 }
@@ -425,8 +422,9 @@ public class EnvironmentImpl implements Environment {
                 }
                 ec.removeChangedSettingsListener(envSettingsListener);
                 logCacheHitRate = log.getCacheHitRate();
-            } finally {
                 log.close();
+            } finally {
+                log.release();
             }
             if (storeGetCache == null) {
                 storeGetCacheHitRate = 0;
@@ -704,10 +702,12 @@ public class EnvironmentImpl implements Environment {
                             // but it's quite difficult to resolve all possible inconsistencies afterwards,
                             // so think twice before removing the following line
                             log.flush();
+                            final MetaTree.Proto proto = tree[0];
                             metaWriteLock.lock();
                             try {
-                                metaTree = tree[0];
-                                coordinator.setHighestRoot(log.approveHighAddress());
+                                final LogTip updatedTip = log.endWrite();
+                                txn.setMetaTree(metaTree = MetaTree.create(EnvironmentImpl.this, updatedTip, proto));
+                                coordinator.setHighestRoot(log.getTip().approvedHighAddress);
                                 coordinator.setHighestMetaTreeRoot(metaTree.root);
                                 txn.setMetaTree(metaTree);
                                 txn.executeCommitHook();
@@ -717,7 +717,7 @@ public class EnvironmentImpl implements Environment {
                             return expiredLoggables;
                         }
                     });
-                    resultingHighAddress = log.approveHighAddress();
+                    resultingHighAddress = log.getTip().approvedHighAddress;
 
                 } catch (Throwable t) { // pokemon exception handling to decrease try/catch block overhead
                     loggerError("Failed to flush transaction", t);
@@ -789,7 +789,7 @@ public class EnvironmentImpl implements Environment {
     }
 
     private void resetHighAddress() {
-        log.setHighAddress(coordinator.getHighestRoot(), false);
+        log.setHighAddress(log.getTip(), coordinator.getHighestRoot(), false);
 //        log.approveHighAddress();
 //        final Pair<MetaTree, Integer> meta = MetaTree.create(this);
         final Pair<MetaTree, Integer> meta =
@@ -836,10 +836,10 @@ public class EnvironmentImpl implements Environment {
             if (ec.getEnvIsReadonly() && ec.getEnvReadonlyEmptyStores()) {
                 return createTemporaryEmptyStore(name);
             }
-            final ReadWriteTransaction tx = throwIfReadonly(txn, "Can't create a store in read-only transaction");
             final int structureId = allocateStructureId();
             metaInfo = TreeMetaInfo.load(this, config.duplicates, config.prefixing, structureId);
             result = createStore(name, metaInfo);
+            final ReadWriteTransaction tx = throwIfReadonly(txn, "Can't create a store in read-only transaction");
             tx.getMutableTree(result);
             tx.storeCreated(result);
         } else {
@@ -891,13 +891,12 @@ public class EnvironmentImpl implements Environment {
     void runTransactionSafeTasks() {
         if (throwableOnCommit == null) {
             List<Runnable> tasksToRun = null;
-            Long lowAddress = coordinator.getLowestUsedRoot();
-            final long oldestTxnHighAddress = lowAddress == null ? Long.MAX_VALUE : lowAddress;
+            final long oldestTxnRoot = txns.getOldestTxnRootAddress();
             synchronized (txnSafeTasks) {
                 while (true) {
                     if (!txnSafeTasks.isEmpty()) {
-                        final RunnableWithTxnHighAddress r = txnSafeTasks.getFirst();
-                        if (r.txnHighAddress < oldestTxnHighAddress) {
+                        final RunnableWithTxnRoot r = txnSafeTasks.getFirst();
+                        if (r.txnRoot < oldestTxnRoot) {
                             txnSafeTasks.removeFirst();
                             if (tasksToRun == null) {
                                 tasksToRun = new ArrayList<>(4);
@@ -938,13 +937,14 @@ public class EnvironmentImpl implements Environment {
                 metaTree = meta.getFirst();
             } finally {
                 metaWriteLock.unlock();
+            }
             if (highAddress > log.getHighAddress()) {
                 throw new ExodusException("Only can decrease high address");
             }
             if (!coordinator.withExclusiveLock(new Function0<Unit>() {
                 @Override
                 public Unit invoke() {
-                    log.setHighAddress(highAddress);
+                    log.setHighAddress(log.getTip(), highAddress);
                     final Pair<MetaTree, Integer> meta = MetaTree.create(EnvironmentImpl.this);
                     metaWriteLock.lock();
                     try {
@@ -952,7 +952,7 @@ public class EnvironmentImpl implements Environment {
                     } finally {
                         metaWriteLock.unlock();
                     }
-                    coordinator.setHighestRoot(log.approveHighAddress());
+                    coordinator.setHighestRoot(log.getTip().approvedHighAddress);
                     coordinator.setHighestMetaTreeRoot(metaTree.root);
                     return Unit.INSTANCE;
                 }
@@ -992,7 +992,7 @@ public class EnvironmentImpl implements Environment {
     private void runAllTransactionSafeTasks() {
         if (throwableOnCommit == null) {
             synchronized (txnSafeTasks) {
-                for (final RunnableWithTxnHighAddress r : txnSafeTasks) {
+                for (final RunnableWithTxnRoot r : txnSafeTasks) {
                     r.runnable.run();
                 }
             }
@@ -1228,14 +1228,14 @@ public class EnvironmentImpl implements Environment {
         }
     }
 
-    private static class RunnableWithTxnHighAddress {
+    private static class RunnableWithTxnRoot {
 
         private final Runnable runnable;
-        private final long txnHighAddress;
+        private final long txnRoot;
 
-        private RunnableWithTxnHighAddress(Runnable runnable, long txnHighAddress) {
+        private RunnableWithTxnRoot(Runnable runnable, long txnRoot) {
             this.runnable = runnable;
-            this.txnHighAddress = txnHighAddress;
+            this.txnRoot = txnRoot;
         }
     }
 }

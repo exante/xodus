@@ -22,15 +22,12 @@ import jetbrains.exodus.crypto.EnvKryptKt;
 import jetbrains.exodus.crypto.InvalidCipherParametersException;
 import jetbrains.exodus.crypto.StreamCipherProvider;
 import jetbrains.exodus.env.ProcessCoordinator;
-import jetbrains.exodus.io.*;
 import jetbrains.exodus.io.Block;
 import jetbrains.exodus.io.DataReader;
 import jetbrains.exodus.io.DataWriter;
 import jetbrains.exodus.io.RemoveBlockType;
 import jetbrains.exodus.util.DeferredIO;
 import jetbrains.exodus.util.IdGenerator;
-import kotlin.Unit;
-import kotlin.jvm.functions.Function0;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -91,7 +88,7 @@ public final class Log implements Closeable {
     @Nullable
     private LogTestConfig testConfig;
 
-    public Log(@NotNull final LogConfig config, @NotNull ProcessCoordinator coordinator) {
+    public Log(@NotNull final LogConfig config) {
         this.config = config;
         baseWriter = config.getWriter();
         tryLock();
@@ -107,11 +104,10 @@ public final class Log implements Closeable {
         reader = config.getReader();
         reader.setLog(this);
         location = reader.getLocation();
-
+        coordinator = config.newProcessCoordinator(config.getLockTimeout(), config.getLockType());
         checkLogConsistency(fileSetMutable);
 
         final LogFileSet.Immutable fileSetImmutable = fileSetMutable.endWrite();
-        this.coordinator = coordinator;
 
         newFileListeners = new ArrayList<>(2);
         readBytesListeners = new ArrayList<>(2);
@@ -255,19 +251,12 @@ public final class Log implements Closeable {
         return getTip().highAddress;
     }
 
-    public void setHighAddress(final long highAddress) {
-        setHighAddress(highAddress, true);
+    public LogTip setHighAddress(final LogTip logTip, final long highAddress) {
+        return setHighAddress(logTip, highAddress, true);
     }
 
     @SuppressWarnings({"OverlyLongMethod"})
-    public void setHighAddress(final long highAddress, boolean truncate) {
-        if (highAddress == this.highAddress) {
-            return;
-    @SuppressWarnings({"OverlyLongMethod"})
-    public LogTip setHighAddress(final LogTip logTip, final long highAddress) {
-        if (highAddress > logTip.highAddress) {
-            throw new ExodusException("Only can decrease high address");
-        }
+    public LogTip setHighAddress(final LogTip logTip, final long highAddress, boolean truncate) {
         if (highAddress == logTip.highAddress) {
             if (bufferedWriter != null) {
                 throw new IllegalStateException("Unexpected write in progress");
@@ -297,33 +286,21 @@ public final class Log implements Closeable {
         }
 
         // truncate log
-        for (int i = 0; i < blocksToDelete.size(); ++i) {
-            removeFile(blocksToDelete.get(i), RemoveBlockType.Delete, fileSetMutable);
-        }
-        if (blockToTruncate >= 0) {
-            truncateFile(blockToTruncate, highAddress - blockToTruncate);
-            if (truncate) {
-                // truncate log
-                for (int i = 0; i < blocksToDelete.size(); ++i) {
-                    removeFile(blocksToDelete.get(i));
-                }
-                if (blockToTruncate >= 0) {
-                    truncateFile(blockToTruncate, highAddress - blockToTruncate);
-                }
-            } else {
-                for (int i = 0; i < blocksToDelete.size(); ++i) {
-                    invalidateFile(blocksToDelete.get(i));
-                }
-                if (blockToTruncate >= 0) {
-                    invalidateFileTail(blockToTruncate, highAddress);
-                }
+        if(truncate) {
+            for (int i = 0; i < blocksToDelete.size(); ++i) {
+                removeFile(blocksToDelete.get(i), RemoveBlockType.Delete, fileSetMutable);
             }
-        } else {
+            if (blockToTruncate >= 0) {
+                truncateFile(blockToTruncate, highAddress - blockToTruncate);
+            }
+        }
+
+        if (highAddress > logTip.highAddress) {
             final long oldLastFileAddress = getHighFileAddress();
             final long newLastFileAddress = getFileAddress(highAddress);
             if (oldLastFileAddress <= newLastFileAddress) {
                 for (long i = oldLastFileAddress; i <= newLastFileAddress; i += fileLengthBound) {
-                    fileAddresses.add(i);
+                    fileSetMutable.add(i);
                 }
             }
         }
@@ -823,19 +800,6 @@ public final class Log implements Closeable {
         // clear cache
         for (long offset = length - (length % cachePageSize); offset < fileLengthBound; offset += cachePageSize) {
             cache.removePage(this, address + offset);
-        }
-    }
-
-    private void invalidateFile(final long address) {
-        fileAddresses.remove(address);
-        invalidateFileTail(address, address);
-    }
-
-    private void invalidateFileTail(final long fileAddress, final long tailAddress) {
-        reader.invalidateBlock(fileAddress);
-        final long blockEnd = fileAddress + fileLengthBound;
-        for (long i = tailAddress - tailAddress % cachePageSize; i < blockEnd; i += cachePageSize) {
-            cache.removePage(this, i);
         }
     }
 
