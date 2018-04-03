@@ -95,7 +95,7 @@ class ConcurrentAccessTest {
             StoreService(sharedLocation, null, StoreLockType.ALLOW_READ, readonly = false)
         }
 
-//        StoreService(sharedLocation, null, StoreLockType.ALLOW_READ, readonly = true)
+        StoreService(sharedLocation, null, StoreLockType.ALLOW_READ, readonly = true)
     }
 
     private fun assertFail(kClass: KClass<out Exception>, function: () -> Unit) {

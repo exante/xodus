@@ -28,6 +28,8 @@ import jetbrains.exodus.io.DataWriter;
 import jetbrains.exodus.io.RemoveBlockType;
 import jetbrains.exodus.util.DeferredIO;
 import jetbrains.exodus.util.IdGenerator;
+import kotlin.Unit;
+import kotlin.jvm.functions.Function0;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
@@ -91,7 +93,7 @@ public final class Log implements Closeable {
     public Log(@NotNull final LogConfig config) {
         this.config = config;
         baseWriter = config.getWriter();
-        tryLock();
+//        tryLock();
         created = System.currentTimeMillis();
         fileSize = config.getFileSize();
         cachePageSize = config.getCachePageSize();
@@ -275,27 +277,27 @@ public final class Log implements Closeable {
 
         // at first, remove all files which are higher than highAddress
         closeWriter();
-        final LongArrayList blocksToDelete = new LongArrayList();
-        long blockToTruncate = -1L;
-        for (final long blockAddress : fileSetMutable.getArray()) {
-            if (blockAddress <= highAddress) {
-                blockToTruncate = blockAddress;
-                break;
+        if (highAddress < getTip().highAddress) {
+            final LongArrayList blocksToDelete = new LongArrayList();
+            long blockToTruncate = -1L;
+            for (final long blockAddress : fileSetMutable.getArray()) {
+                if (blockAddress <= highAddress) {
+                    blockToTruncate = blockAddress;
+                    break;
+                }
+                blocksToDelete.add(blockAddress);
             }
-            blocksToDelete.add(blockAddress);
-        }
 
-        // truncate log
-        if(truncate) {
-            for (int i = 0; i < blocksToDelete.size(); ++i) {
-                removeFile(blocksToDelete.get(i), RemoveBlockType.Delete, fileSetMutable);
+            // truncate log
+            if (truncate) {
+                for (int i = 0; i < blocksToDelete.size(); ++i) {
+                    removeFile(blocksToDelete.get(i), RemoveBlockType.Delete, fileSetMutable);
+                }
+                if (blockToTruncate >= 0) {
+                    truncateFile(blockToTruncate, highAddress - blockToTruncate);
+                }
             }
-            if (blockToTruncate >= 0) {
-                truncateFile(blockToTruncate, highAddress - blockToTruncate);
-            }
-        }
-
-        if (highAddress > logTip.highAddress) {
+        } else {
             final long oldLastFileAddress = getHighFileAddress();
             final long newLastFileAddress = getFileAddress(highAddress);
             if (oldLastFileAddress <= newLastFileAddress) {
@@ -712,16 +714,12 @@ public final class Log implements Closeable {
         reader.close();
         closeWriter();
         compareAndSetTip(logTip, new LogTip(fileSize, logTip.pageAddress, logTip.highAddress));
-        release();
+        baseWriter.close();
         coordinator.close();
     }
 
     public boolean isClosing() {
         return isClosing;
-    }
-
-    public void release() {
-        baseWriter.release();
     }
 
     public LogTip clear() {
@@ -928,13 +926,18 @@ public final class Log implements Closeable {
         }
     }
 
-    private void tryLock() {
-        final long lockTimeout = config.getLockTimeout();
-        if (!baseWriter.lock(lockTimeout)) {
-            throw new ExodusException("Can't acquire environment lock after " +
-                    lockTimeout + " ms.\n\n Lock owner info: \n" + baseWriter.lockInfo());
-        }
+    private void tryLock(@NotNull final ProcessCoordinator ownProcessCoordinator) {
+        ownProcessCoordinator.withHighestRootLock(new Function0<Unit>() {
+            @Override
+            public Unit invoke() {
+                if (!ownProcessCoordinator.tryAcquireWriterLock()) {
+                    throw new ExodusException(getLocation() + ": unable to acquire writer lock");
+                }
+                return Unit.INSTANCE;
+            }
+        });
     }
+
 
     long getHighPageAddress(final long highAddress) {
         int alignment = ((int) highAddress) & (cachePageSize - 1);

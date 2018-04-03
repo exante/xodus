@@ -1,12 +1,12 @@
 /**
  * Copyright 2010 - 2018 JetBrains s.r.o.
- *
+ * <p>
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- *
+ * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
- *
+ * <p>
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -114,47 +114,68 @@ public class EnvironmentImpl implements Environment {
         }
         metaTree = meta.getFirst();
         structureId = new AtomicInteger(meta.getSecond());
-        txns = new TransactionSet();
-        txnSafeTasks = new LinkedList<>();
-        invalidateStoreGetCache();
-        envSettingsListener = new EnvironmentSettingsListener();
-        ec.addChangedSettingsListener(envSettingsListener);
-
-        gc = new GarbageCollector(this);
-
-        ReentrantReadWriteLock metaLock = new ReentrantReadWriteLock();
-        metaReadLock = metaLock.readLock();
-        metaWriteLock = metaLock.writeLock();
-
-        txnDispatcher = new ReentrantTransactionDispatcher(ec.getEnvMaxParallelTxns());
-        roTxnDispatcher = new ReentrantTransactionDispatcher(ec.getEnvMaxParallelReadonlyTxns());
-
-        statistics = new EnvironmentStatistics(this);
-        if (ec.isManagementEnabled()) {
-            configMBean = ec.getManagementOperationsRestricted() ?
-                    new jetbrains.exodus.env.management.EnvironmentConfig(this) :
-                    new EnvironmentConfigWithOperations(this);
-            // if we don't gather statistics then we should not expose corresponding managed bean
-            statisticsMBean = ec.getEnvGatherStatistics() ? new jetbrains.exodus.env.management.EnvironmentStatistics(this) : null;
-        } else {
-            configMBean = null;
-            statisticsMBean = null;
-        }
-
-        throwableOnCommit = null;
-        throwableOnClose = null;
-
-        stuckTxnMonitor = (transactionTimeout() > 0) ? new StuckTransactionMonitor(this) : null;
-
-        final LogConfig logConfig = log.getConfig();
-        streamCipherProvider = logConfig.getCipherProvider();
-        cipherKey = logConfig.getCipherKey();
-        cipherBasicIV = logConfig.getCipherBasicIV();
-
-        if (logger.isInfoEnabled()) {
-            logger.info("Exodus environment created: " + log.getLocation());
-        }
         coordinator = log.getCoordinator();
+        try {
+            coordinator.withHighestRootLock(new Function0<Unit>() {
+                @Override
+                public Unit invoke() {
+                    if (coordinator.getHighestRoot() == null) {
+                        final Pair<MetaTree, Integer> meta = MetaTree.create(EnvironmentImpl.this);
+                        coordinator.setHighestRoot(log.getTip().approvedHighAddress);
+                        coordinator.setHighestMetaTreeRoot(meta.getFirst().root);
+                        metaTree = meta.getFirst();
+                        structureId.set(meta.getSecond());
+                    } else {
+                        coordinator.assertAccess(ec.getEnvIsReadonly());
+                        resetHighAddress();
+                    }
+                    return Unit.INSTANCE;
+                }
+            });
+            txns = new TransactionSet();
+            txnSafeTasks = new LinkedList<>();
+            invalidateStoreGetCache();
+            envSettingsListener = new EnvironmentSettingsListener();
+            ec.addChangedSettingsListener(envSettingsListener);
+
+            gc = new GarbageCollector(this);
+
+            ReentrantReadWriteLock metaLock = new ReentrantReadWriteLock();
+            metaReadLock = metaLock.readLock();
+            metaWriteLock = metaLock.writeLock();
+
+            txnDispatcher = new ReentrantTransactionDispatcher(ec.getEnvMaxParallelTxns());
+            roTxnDispatcher = new ReentrantTransactionDispatcher(ec.getEnvMaxParallelReadonlyTxns());
+
+            statistics = new EnvironmentStatistics(this);
+            if (ec.isManagementEnabled()) {
+                configMBean = ec.getManagementOperationsRestricted() ?
+                        new jetbrains.exodus.env.management.EnvironmentConfig(this) :
+                        new EnvironmentConfigWithOperations(this);
+                // if we don't gather statistics then we should not expose corresponding managed bean
+                statisticsMBean = ec.getEnvGatherStatistics() ? new jetbrains.exodus.env.management.EnvironmentStatistics(this) : null;
+            } else {
+                configMBean = null;
+                statisticsMBean = null;
+            }
+
+            throwableOnCommit = null;
+            throwableOnClose = null;
+
+            stuckTxnMonitor = (transactionTimeout() > 0) ? new StuckTransactionMonitor(this) : null;
+
+            final LogConfig logConfig = log.getConfig();
+            streamCipherProvider = logConfig.getCipherProvider();
+            cipherKey = logConfig.getCipherKey();
+            cipherBasicIV = logConfig.getCipherBasicIV();
+
+            if (logger.isInfoEnabled()) {
+                logger.info("Exodus environment created: " + log.getLocation());
+            }
+        } catch (Throwable e) {
+            coordinator.close();
+            throw e;
+        }
     }
 
     @Override
@@ -422,9 +443,8 @@ public class EnvironmentImpl implements Environment {
                 }
                 ec.removeChangedSettingsListener(envSettingsListener);
                 logCacheHitRate = log.getCacheHitRate();
-                log.close();
             } finally {
-                log.release();
+                log.close();
             }
             if (storeGetCache == null) {
                 storeGetCacheHitRate = 0;
@@ -793,7 +813,7 @@ public class EnvironmentImpl implements Environment {
 //        log.approveHighAddress();
 //        final Pair<MetaTree, Integer> meta = MetaTree.create(this);
         final Pair<MetaTree, Integer> meta =
-            MetaTree.loadTree(EnvironmentImpl.this, coordinator.getHighestMetaTreeRoot());
+                MetaTree.loadTree(EnvironmentImpl.this, coordinator.getHighestMetaTreeRoot());
         metaTree = meta.getFirst();
         structureId.set(meta.getSecond());
     }
