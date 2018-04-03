@@ -35,6 +35,21 @@ public class MemoryDataWriter extends AbstractDataWriter {
     }
 
     @Override
+    public boolean lock(long timeout) {
+        return true;
+    }
+
+    @Override
+    public boolean release() {
+        return true;
+    }
+
+    @Override
+    public String lockInfo() {
+        return null;
+    }
+
+    @Override
     protected void syncImpl() {
     }
 

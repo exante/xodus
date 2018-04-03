@@ -123,11 +123,11 @@ final class MetaTree {
         if (log.getHighAddress() != validHighAddress) {
             throw new ExodusException("Log high address is not valid");
         }
-        final BTree metaTree = env.loadMetaTree(dbRoot.getRootAddress());
+        final BTree metaTree = env.loadMetaTree(dbRoot.getRootAddress(), log.getTip());
         if (metaTree == null) {
             throw new ExodusException("Failed to load meta tree");
         }
-        return new Pair<>(new MetaTree(metaTree, root, validHighAddress), dbRoot.getLastStructureId());
+        return new Pair<>(new MetaTree(metaTree, root, log.getTip()), dbRoot.getLastStructureId());
     }
 
     LongIterator addressIterator() {

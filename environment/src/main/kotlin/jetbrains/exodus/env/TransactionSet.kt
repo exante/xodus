@@ -74,4 +74,7 @@ internal class TransactionSet {
     fun contains(txn: Transaction) = synchronized(txns) { txns.contains(txn) }
 
     val newestTxnHighAddress: Long get() = synchronized(txns) { maxAddress }
+
+    val oldestTxnHightAddress: Long get() = synchronized(txns) { minAddress }
+
 }
