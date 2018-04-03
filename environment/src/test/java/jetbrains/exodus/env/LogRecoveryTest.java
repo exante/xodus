@@ -106,9 +106,8 @@ public class LogRecoveryTest extends EnvironmentTestsBase {
         // only 'max' first loggables should remain
         final LogConfig config = LogConfig.create(reader, writer).
             setCipherProvider(cipherProvider).setCipherKey(cipherKey).setCipherBasicIV(cipherBasicIV);
-        final Log newLog = Environments.newLogInstance(config, null);
-        newLog.init();
-        newLog.setHighAddress(newLog.getApprovedHighAddress());
+        final Log newLog = Environments.newLogInstance(config);
+        newLog.setHighAddress(newLog.getTip(), newLog.getTip().approvedHighAddress);
         assertLoggableTypes(max, newLog.getLoggableIterator(0), seq);
     }
 

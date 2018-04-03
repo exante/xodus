@@ -40,41 +40,41 @@ final class MetaTree {
 
     final ITree tree;
     final long root;
-    final long highAddress;
+    final LogTip logTip;
 
-    private MetaTree(final ITree tree, long root, long highAddress) {
+    private MetaTree(final ITree tree, long root, LogTip logTip) {
         this.tree = tree;
         this.root = root;
-        this.highAddress = highAddress;
+        this.logTip = logTip;
     }
 
     static Pair<MetaTree, Integer> create(@NotNull final EnvironmentImpl env) {
         final Log log = env.getLog();
-        if (log.getHighAddress() > EMPTY_LOG_BOUND) {
+        LogTip logTip = log.getTip();
+        if (logTip.highAddress > EMPTY_LOG_BOUND) {
             Loggable rootLoggable = log.getLastLoggableOfType(DatabaseRoot.DATABASE_ROOT_TYPE);
             while (rootLoggable != null) {
                 final DatabaseRoot dbRoot = new DatabaseRoot(rootLoggable);
                 final long root = dbRoot.getAddress();
                 if (dbRoot.isValid()) {
                     try {
-                        final long validHighAddress = root + dbRoot.length();
-                        if (log.getHighAddress() != validHighAddress) {
-                            log.setHighAddress(validHighAddress);
-                        }
-                        final BTree metaTree = env.loadMetaTree(dbRoot.getRootAddress());
+                        final LogTip updatedTip = log.setHighAddress(logTip, root + dbRoot.length());
+                        final BTree metaTree = env.loadMetaTree(dbRoot.getRootAddress(), updatedTip);
                         if (metaTree != null) {
                             cloneTree(metaTree); // try to traverse meta tree
-                            return new Pair<>(new MetaTree(metaTree, root, validHighAddress), dbRoot.getLastStructureId());
+                            return new Pair<>(new MetaTree(metaTree, root, updatedTip), dbRoot.getLastStructureId());
                         }
+                        logTip = updatedTip;
                     } catch (ExodusException e) {
+                        logTip = log.getTip();
                         EnvironmentImpl.loggerError("Failed to recover to valid root" +
-                            LogUtil.getWrongAddressErrorMessage(dbRoot.getAddress(), env.getEnvironmentConfig().getLogFileSize()), e);
+                                LogUtil.getWrongAddressErrorMessage(dbRoot.getAddress(), env.getEnvironmentConfig().getLogFileSize()), e);
                         // XD-449: try next database root if we failed to traverse whole MetaTree
                         // TODO: this check should become obsolete after XD-334 is implemented
                     }
                 }
                 // continue recovery
-                rootLoggable = log.getLastLoggableOfTypeBefore(DatabaseRoot.DATABASE_ROOT_TYPE, root);
+                rootLoggable = log.getLastLoggableOfTypeBefore(DatabaseRoot.DATABASE_ROOT_TYPE, root, logTip);
             }
             // "abnormal program termination", "blue screen of doom"
             // Something quite strange with the database: it is not empty, but no valid
@@ -86,13 +86,30 @@ final class MetaTree {
             throw new InvalidCipherParametersException();
         }
         // no roots found: the database is empty
-        log.setHighAddress(0);
+        log.setHighAddress(logTip, 0);
         final ITree resultTree = getEmptyMetaTree(env);
-        final long rootAddress = resultTree.getMutableCopy().save();
-        final long root = log.write(DatabaseRoot.DATABASE_ROOT_TYPE, Loggable.NO_STRUCTURE_ID,
-            DatabaseRoot.asByteIterable(rootAddress, EnvironmentImpl.META_TREE_ID));
-        log.flush();
-        return new Pair<>(new MetaTree(resultTree, root, log.getHighAddress()), EnvironmentImpl.META_TREE_ID);
+        final long root;
+        log.beginWrite();
+        final LogTip createdTip;
+        try {
+            final long rootAddress = resultTree.getMutableCopy().save();
+            root = log.write(DatabaseRoot.DATABASE_ROOT_TYPE, Loggable.NO_STRUCTURE_ID,
+                    DatabaseRoot.asByteIterable(rootAddress, EnvironmentImpl.META_TREE_ID));
+            log.flush();
+            createdTip = log.endWrite();
+        } catch (Throwable t) {
+            log.abortWrite(); // rollback log state
+            throw new ExodusException("Can't init meta tree in log", t);
+        }
+        return new Pair<>(new MetaTree(resultTree, root, createdTip), EnvironmentImpl.META_TREE_ID);
+    }
+
+    static MetaTree create(@NotNull final EnvironmentImpl env, @NotNull final LogTip logTip, @NotNull final MetaTreePrototype prototype) {
+        return new MetaTree(
+                env.loadMetaTree(prototype.treeAddress(), logTip),
+                prototype.rootAddress(),
+                logTip
+        );
     }
 
     static Pair<MetaTree, Integer> loadTree(@NotNull final EnvironmentImpl env, final long root) {
@@ -127,8 +144,7 @@ final class MetaTree {
     }
 
     long getRootAddress(final int structureId) {
-        final ITree rememberedTree = tree;
-        final ByteIterable value = rememberedTree.get(LongBinding.longToCompressedEntry(structureId));
+        final ByteIterable value = tree.get(LongBinding.longToCompressedEntry(structureId));
         return value == null ? Loggable.NULL_ADDRESS : CompressedUnsignedLongByteIterable.getLong(value);
     }
 
@@ -146,7 +162,7 @@ final class MetaTree {
         final long treeRootAddress = treeMutable.save();
         final int structureId = treeMutable.getStructureId();
         out.put(LongBinding.longToCompressedEntry(structureId),
-            CompressedUnsignedLongByteIterable.getIterable(treeRootAddress));
+                CompressedUnsignedLongByteIterable.getIterable(treeRootAddress));
     }
 
     /**
@@ -157,19 +173,17 @@ final class MetaTree {
      * @param expired  expired loggables (database root to be added)
      * @return database root loggable which is read again from the log.
      */
-    @Nullable
-    static MetaTree saveMetaTree(@NotNull final ITreeMutable metaTree,
-                                 @NotNull final EnvironmentImpl env,
-                                 @NotNull final Collection<ExpiredLoggableInfo> expired) {
+    @NotNull
+    static MetaTree.Proto saveMetaTree(@NotNull final ITreeMutable metaTree,
+                                       @NotNull final EnvironmentImpl env,
+                                       @NotNull final Collection<ExpiredLoggableInfo> expired) {
         final long newMetaTreeAddress = metaTree.save();
         final Log log = env.getLog();
         final int lastStructureId = env.getLastStructureId();
         final long dbRootAddress = log.write(DatabaseRoot.DATABASE_ROOT_TYPE, Loggable.NO_STRUCTURE_ID,
-            DatabaseRoot.asByteIterable(newMetaTreeAddress, lastStructureId));
-        final BTree resultTree = env.loadMetaTree(newMetaTreeAddress);
-        final RandomAccessLoggable dbRootLoggable = log.read(dbRootAddress);
-        expired.add(new ExpiredLoggableInfo(dbRootLoggable));
-        return new MetaTree(resultTree, dbRootAddress, dbRootAddress + dbRootLoggable.length());
+                DatabaseRoot.asByteIterable(newMetaTreeAddress, lastStructureId));
+        expired.add(new ExpiredLoggableInfo(dbRootAddress, (int) (log.getWrittenHighAddress() - dbRootAddress)));
+        return new MetaTree.Proto(newMetaTreeAddress, dbRootAddress);
     }
 
     long getAllStoreCount() {
@@ -216,7 +230,7 @@ final class MetaTree {
     }
 
     MetaTree getClone() {
-        return new MetaTree(cloneTree(tree), root, highAddress);
+        return new MetaTree(cloneTree(tree), root, logTip);
     }
 
     static boolean isStringKey(final ArrayByteIterable key) {
@@ -242,5 +256,25 @@ final class MetaTree {
                 return new DataIterator(log, address);
             }
         };
+    }
+
+    static class Proto implements MetaTreePrototype {
+        final long address;
+        final long root;
+
+        Proto(long address, long root) {
+            this.address = address;
+            this.root = root;
+        }
+
+        @Override
+        public long treeAddress() {
+            return address;
+        }
+
+        @Override
+        public long rootAddress() {
+            return root;
+        }
     }
 }

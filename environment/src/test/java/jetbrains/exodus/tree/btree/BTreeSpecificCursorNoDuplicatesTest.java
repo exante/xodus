@@ -47,7 +47,7 @@ public class BTreeSpecificCursorNoDuplicatesTest extends BTreeTestBase {
         };
 
         getSearchKeyRange.run();
-        long a = getTreeMutable().save();
+        long a = saveTree();
         getSearchKeyRange.run();
         reopen();
         getSearchKeyRange.setTree(openTree(a, true));

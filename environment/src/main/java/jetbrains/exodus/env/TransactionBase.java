@@ -105,7 +105,7 @@ public abstract class TransactionBase implements Transaction {
 
     @Override
     public long getHighAddress() {
-        return metaTree.highAddress;
+        return metaTree.logTip.highAddress;
     }
 
     @Override

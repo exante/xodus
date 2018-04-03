@@ -13,24 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package jetbrains.exodus.io;
+package jetbrains.exodus.log.replication
 
-import org.jetbrains.annotations.Nullable;
-
-public interface TransactionalDataWriter extends DataWriter {
-
-    DataWriter getChildWriter();
-
-    void write(byte b);
-
-    @Nullable
-    byte[] getHighPage(long alignedAddress);
-
-    void commit();
-
-    void rollback();
-
-    void flush();
-
-    boolean tryAndUpdateHighAddress(long highAddress);
+interface LogReplicationDelta {
+    val startAddress: Long
+    val highAddress: Long
+    val fileSize: Long
+    val files: LongArray
 }
