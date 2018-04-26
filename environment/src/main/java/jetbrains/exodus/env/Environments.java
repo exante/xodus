@@ -16,6 +16,7 @@
 package jetbrains.exodus.env;
 
 import jetbrains.exodus.crypto.KryptKt;
+import jetbrains.exodus.entitystore.MetaServer;
 import jetbrains.exodus.log.Log;
 import jetbrains.exodus.log.LogConfig;
 import org.jetbrains.annotations.NotNull;
@@ -36,6 +37,11 @@ public final class Environments {
     @NotNull
     public static Environment newInstance(@NotNull final String dir) {
         return newInstance(dir, new EnvironmentConfig());
+    }
+
+    @NotNull
+    public static Environment newInstance(@NotNull final Log log, @NotNull final EnvironmentConfig ec) {
+        return prepare(new EnvironmentImpl(log, ec));
     }
 
     @NotNull
@@ -93,7 +99,6 @@ public final class Environments {
         return prepare(new ContextualEnvironmentImpl(newLogInstance(config, ec), ec));
     }
 
-
     @NotNull
     public static Log newLogInstance(@NotNull final File dir, @NotNull final EnvironmentConfig ec) {
         return newLogInstance(new LogConfig().setDir(dir), ec);
@@ -109,23 +114,23 @@ public final class Environments {
             config.setMemoryUsagePercentage(ec.getMemoryUsagePercentage());
         }
         return newLogInstance(config.setFileSize(ec.getLogFileSize()).
-            setLockTimeout(ec.getLogLockTimeout()).
-            setLockId(ec.getLogLockId()).
-            setCachePageSize(ec.getLogCachePageSize()).
-            setCacheOpenFilesCount(ec.getLogCacheOpenFilesCount()).
-            setCacheUseNio(ec.getLogCacheUseNio()).
-            setCacheFreePhysicalMemoryThreshold(ec.getLogCacheFreePhysicalMemoryThreshold()).
-            setDurableWrite(ec.getLogDurableWrite()).
-            setSharedCache(ec.isLogCacheShared()).
-            setNonBlockingCache(ec.isLogCacheNonBlocking()).
-            setCleanDirectoryExpected(ec.isLogCleanDirectoryExpected()).
-            setClearInvalidLog(ec.isLogClearInvalid()).
-            setSyncPeriod(ec.getLogSyncPeriod()).
-            setFullFileReadonly(ec.isLogFullFileReadonly()).
-            setCipherProvider(ec.getCipherId() == null ? null : KryptKt.newCipherProvider(ec.getCipherId())).
-            setCipherKey(ec.getCipherKey()).
-            setCipherBasicIV(ec.getCipherBasicIV()).
-            setLockType(ec.getLogLockType()));
+                setLockTimeout(ec.getLogLockTimeout()).
+                setLockId(ec.getLogLockId()).
+                setCachePageSize(ec.getLogCachePageSize()).
+                setCacheOpenFilesCount(ec.getLogCacheOpenFilesCount()).
+                setCacheUseNio(ec.getLogCacheUseNio()).
+                setCacheFreePhysicalMemoryThreshold(ec.getLogCacheFreePhysicalMemoryThreshold()).
+                setDurableWrite(ec.getLogDurableWrite()).
+                setSharedCache(ec.isLogCacheShared()).
+                setNonBlockingCache(ec.isLogCacheNonBlocking()).
+                setCleanDirectoryExpected(ec.isLogCleanDirectoryExpected()).
+                setClearInvalidLog(ec.isLogClearInvalid()).
+                setSyncPeriod(ec.getLogSyncPeriod()).
+                setFullFileReadonly(ec.isLogFullFileReadonly()).
+                setCipherProvider(ec.getCipherId() == null ? null : KryptKt.newCipherProvider(ec.getCipherId())).
+                setCipherKey(ec.getCipherKey()).
+                setCipherBasicIV(ec.getCipherBasicIV())).
+                setLockType(ec.getLogLockType()));
     }
 
     @NotNull
@@ -137,6 +142,10 @@ public final class Environments {
     @NotNull
     static <T extends EnvironmentImpl> T prepare(@NotNull final T env) {
         env.getGC().getUtilizationProfile().load();
+        final MetaServer metaServer = env.getEnvironmentConfig().getMetaServer();
+        if (metaServer != null) {
+            metaServer.start(env);
+        }
         return env;
     }
 }

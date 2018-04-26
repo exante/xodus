@@ -27,13 +27,12 @@ class Or(left: NodeBase, right: NodeBase) : CommutativeOperator(left, right) {
 
     override fun instantiate(entityType: String, queryEngine: QueryEngine, metaData: ModelMetaData): Iterable<Entity> {
         if (!analyzed && depth >= Utils.reduceUnionsOfLinksDepth) {
-            val linkNames = HashSet<String>()
+            val linkNames = hashSetOf<String>()
             val txn = queryEngine.persistentStore.andCheckCurrentTransaction
             val ids = EntityIdSetIterable(txn)
             if (isUnionOfLinks(linkNames, ids)) {
-                val all = txn.getAll(entityType) as EntityIterableBase
-                val cached = txn.getStickyObjectSafe(all.handle) as? EntityIterableBase
-                return queryEngine.adjustEntityIterable((cached ?: all).findLinks(ids, linkNames.first()))
+                return queryEngine.adjustEntityIterable(
+                        (queryEngine.instantiateGetAll(txn, entityType) as EntityIterableBase).source.findLinks(ids, linkNames.first()))
             }
         }
         return queryEngine.unionAdjusted(left.instantiate(entityType, queryEngine, metaData), right.instantiate(entityType, queryEngine, metaData))

@@ -21,6 +21,7 @@ import jetbrains.exodus.entitystore.tables.LinkValue
 import jetbrains.exodus.entitystore.tables.PropertyKey
 import jetbrains.exodus.entitystore.util.EntityIdSetFactory
 import jetbrains.exodus.env.Cursor
+import jetbrains.exodus.util.LightOutputStream
 
 class FilterLinksIterable(txn: PersistentStoreTransaction,
                           private val linkId: Int,
@@ -34,6 +35,8 @@ class FilterLinksIterable(txn: PersistentStoreTransaction,
 
             private val sourceIt = source.iterator() as EntityIteratorBase
             private val usedCursors = IntHashMap<Cursor>(6, 2f)
+            private val auxStream = LightOutputStream()
+            private val auxArray = IntArray(8)
             private val idSet by lazy { entities.toSet(txn) }
             private var nextId: EntityId? = PersistentEntityId.EMPTY_ID
 
@@ -51,7 +54,8 @@ class FilterLinksIterable(txn: PersistentStoreTransaction,
                             cursor = store.getLinksFirstIndexCursor(txn, typeId)
                             usedCursors[typeId] = cursor
                         }
-                        val value = cursor.getSearchKey(PropertyKey.propertyKeyToEntry(PropertyKey(id.localId, linkId)))
+                        val value = cursor.getSearchKey(
+                                PropertyKey.propertyKeyToEntry(auxStream, auxArray, id.localId, linkId))
                         if (value != null) {
                             val linkValue = LinkValue.entryToLinkValue(value)
                             val targetId = linkValue.entityId
@@ -82,6 +86,9 @@ class FilterLinksIterable(txn: PersistentStoreTransaction,
 
     override fun getHandleImpl(): EntityIterableHandle {
         return object : EntityIterableHandleDecorator(store, EntityIterableType.FILTER_LINKS, source.handle) {
+            private val linkIds = EntityIterableHandleBase.mergeFieldIds(intArrayOf(linkId), decorated.linkIds)
+
+            override fun getLinkIds() = linkIds
 
             override fun toString(builder: StringBuilder) {
                 super.toString(builder)
@@ -99,15 +106,19 @@ class FilterLinksIterable(txn: PersistentStoreTransaction,
                 hash.applyDelimiter()
                 hash.apply(entities.handle)
             }
+
+            override fun isMatchedLinkAdded(source: EntityId, target: EntityId, linkId: Int): Boolean {
+                return linkId == this@FilterLinksIterable.linkId || decorated.isMatchedLinkAdded(source, target, linkId)
+            }
+
+            override fun isMatchedLinkDeleted(source: EntityId, target: EntityId, linkId: Int): Boolean {
+                return linkId == this@FilterLinksIterable.linkId || decorated.isMatchedLinkDeleted(source, target, linkId)
+            }
         }
     }
 
     override fun isSortedById(): Boolean {
         return source.isSortedById
-    }
-
-    override fun canBeCached(): Boolean {
-        return false
     }
 
     companion object {

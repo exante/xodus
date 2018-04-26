@@ -75,6 +75,10 @@ public interface EnvironmentConfigMBean {
 
     void setEnvTxnDowngradeAfterFlush(final boolean downgrade);
 
+    boolean getEnvTxnSingleThreadWrites();
+
+    void setEnvTxnSingleThreadWrites(final boolean singleThreadWrites);
+
     int getEnvMaxParallelTxns();
 
     int getEnvMaxParallelReadonlyTxns();

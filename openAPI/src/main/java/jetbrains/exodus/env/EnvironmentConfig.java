@@ -20,6 +20,7 @@ import jetbrains.exodus.core.dataStructures.Pair;
 import jetbrains.exodus.crypto.KryptKt;
 import jetbrains.exodus.crypto.StreamCipher;
 import jetbrains.exodus.crypto.StreamCipherProvider;
+import jetbrains.exodus.entitystore.MetaServer;
 import jetbrains.exodus.entitystore.PersistentEntityStore;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -54,9 +55,17 @@ import java.util.Map;
  * @see Environment#getEnvironmentConfig()
  */
 @SuppressWarnings({"WeakerAccess", "unused"})
-public final class EnvironmentConfig extends AbstractConfig {
+public class EnvironmentConfig extends AbstractConfig {
 
-    public static final EnvironmentConfig DEFAULT = new EnvironmentConfig(ConfigurationStrategy.IGNORE);
+    public static final EnvironmentConfig DEFAULT = new EnvironmentConfig(ConfigurationStrategy.IGNORE) {
+        @Override
+        public EnvironmentConfig setMutable(boolean isMutable) {
+            if (!this.isMutable() && isMutable) {
+                throw new ExodusException("Can't make EnvironmentConfig.DEFAULT mutable");
+            }
+            return super.setMutable(isMutable);
+        }
+    }.setMutable(false);
 
     /**
      * Defines absolute value of memory in bytes that can be used by the LogCache. By default, is not set.
@@ -184,7 +193,7 @@ public final class EnvironmentConfig extends AbstractConfig {
      * On cache miss, LogCache at first tries to check if there is corresponding mapped byte buffer and copies
      * cache page from the buffer, otherwise reads the page from {@linkplain java.io.RandomAccessFile}. If is set to
      * {@code false} then LogCache always reads {@linkplain java.io.RandomAccessFile} on cache miss.
-     * Default value is {@code true}.
+     * Default value was {@code true} before version {@code 1.2.3}. As of {@code 1.2.3}, default value is {@code false}.
      * <p>Mutable at runtime: no
      *
      * @see #LOG_CACHE_FREE_PHYSICAL_MEMORY_THRESHOLD
@@ -313,6 +322,15 @@ public final class EnvironmentConfig extends AbstractConfig {
      * @see #ENV_TXN_REPLAY_MAX_COUNT
      */
     public static final String ENV_TXN_DOWNGRADE_AFTER_FLUSH = "exodus.env.txn.downgradeAfterFlush";
+
+    /**
+     * If is set to {@code true} then any write operation can be performed only in the thread which
+     * the transaction was created in. Default value is {@code false}.
+     * <p>Mutable at runtime: yes
+     *
+     * @see Transaction
+     */
+    public static final String ENV_TXN_SINGLE_THREAD_WRITES = "exodus.env.txn.singleThreadWrites";
 
     /**
      * Defines the number of {@linkplain Transaction transactions} that can be started in parallel. By default it is
@@ -529,6 +547,12 @@ public final class EnvironmentConfig extends AbstractConfig {
      */
     public static final String MANAGEMENT_OPERATIONS_RESTRICTED = "exodus.management.operationsRestricted";
 
+    /**
+     * If set to some value different from {@code null}, expose created environment via given server.
+     * <p>Mutable at runtime: no
+     */
+    public static final String META_SERVER = "exodus.env.metaServer";
+
     public EnvironmentConfig() {
         this(ConfigurationStrategy.SYSTEM_PROPERTY);
     }
@@ -547,7 +571,7 @@ public final class EnvironmentConfig extends AbstractConfig {
             new Pair(LOG_LOCK_TYPE, 0),
             new Pair(LOG_CACHE_PAGE_SIZE, 64 * 1024),
             new Pair(LOG_CACHE_OPEN_FILES, 500),
-            new Pair(LOG_CACHE_USE_NIO, true),
+            new Pair(LOG_CACHE_USE_NIO, false),
             new Pair(LOG_CACHE_FREE_PHYSICAL_MEMORY_THRESHOLD, 1_000_000_000L), // ~1GB
             new Pair(LOG_CACHE_SHARED, true),
             new Pair(LOG_CACHE_NON_BLOCKING, true),
@@ -562,6 +586,7 @@ public final class EnvironmentConfig extends AbstractConfig {
             new Pair(ENV_TXN_REPLAY_TIMEOUT, 2000L),
             new Pair(ENV_TXN_REPLAY_MAX_COUNT, 2),
             new Pair(ENV_TXN_DOWNGRADE_AFTER_FLUSH, true),
+            new Pair(ENV_TXN_SINGLE_THREAD_WRITES, false),
             new Pair(ENV_MAX_PARALLEL_TXNS, Integer.MAX_VALUE),
             new Pair(ENV_MAX_PARALLEL_READONLY_TXNS, Integer.MAX_VALUE),
             new Pair(ENV_MONITOR_TXNS_TIMEOUT, 0),
@@ -582,7 +607,8 @@ public final class EnvironmentConfig extends AbstractConfig {
             new Pair(GC_TRANSACTION_ACQUIRE_TIMEOUT, 1000),
             new Pair(GC_TRANSACTION_TIMEOUT, 1000),
             new Pair(MANAGEMENT_ENABLED, true),
-            new Pair(MANAGEMENT_OPERATIONS_RESTRICTED, true)
+            new Pair(MANAGEMENT_OPERATIONS_RESTRICTED, true),
+            new Pair(META_SERVER, null)
         }, strategy);
     }
 
@@ -596,6 +622,18 @@ public final class EnvironmentConfig extends AbstractConfig {
     @Override
     public EnvironmentConfig setSetting(@NotNull final String key, @NotNull final Object value) {
         return (EnvironmentConfig) super.setSetting(key, value);
+    }
+
+    /**
+     * Set {@code true} for making it possible to change settings of this {@code EnvironmentConfig} instance.
+     * {@code EnvironmentConfig.DEFAULT} is always immutable.
+     *
+     * @param isMutable {@code true} if this {@code EnvironmentConfig} instance can be mutated
+     * @return this {@code EnvironmentConfig} instance
+     */
+    @Override
+    public EnvironmentConfig setMutable(boolean isMutable) {
+        return (EnvironmentConfig) super.setMutable(isMutable);
     }
 
     /**
@@ -947,7 +985,7 @@ public final class EnvironmentConfig extends AbstractConfig {
      * On cache miss, LogCache at first tries to check if there is corresponding mapped byte buffer and copies
      * cache page from the buffer, otherwise reads the page from {@linkplain java.io.RandomAccessFile}. If is set to
      * {@code false} then LogCache always reads {@linkplain java.io.RandomAccessFile} on cache miss.
-     * Default value is {@code true}.
+     * Default value was {@code true} before version {@code 1.2.3}. As of {@code 1.2.3}, default value is {@code false}.
      * <p>Mutable at runtime: no
      *
      * @return {@code true} mapping of .xd files in memory is allowed
@@ -962,7 +1000,7 @@ public final class EnvironmentConfig extends AbstractConfig {
      * On cache miss, LogCache at first tries to check if there is corresponding mapped byte buffer and copies
      * cache page from the buffer, otherwise reads the page from {@linkplain java.io.RandomAccessFile}. If is set to
      * {@code false} then LogCache always reads {@linkplain java.io.RandomAccessFile} on cache miss.
-     * Default value is {@code true}.
+     * Default value was {@code true} before version {@code 1.2.3}. As of {@code 1.2.3}, default value is {@code false}.
      * <p>Mutable at runtime: no
      *
      * @param useNio {@code true} is using NIO is allowed
@@ -1323,6 +1361,32 @@ public final class EnvironmentConfig extends AbstractConfig {
      */
     public EnvironmentConfig setEnvTxnDowngradeAfterFlush(final boolean downgrade) {
         return setSetting(ENV_TXN_DOWNGRADE_AFTER_FLUSH, downgrade);
+    }
+
+    /**
+     * If is set to {@code true} then any write operation can be performed only in the thread which
+     * the transaction was created in. Default value is {@code false}.
+     * <p>Mutable at runtime: yes
+     *
+     * @return {@code true} if any write operation can be performed only in the thread which
+     * the transaction was created in
+     * @see Transaction
+     */
+    public boolean getEnvTxnSingleThreadWrites() {
+        return (Boolean) getSetting(ENV_TXN_SINGLE_THREAD_WRITES);
+    }
+
+    /**
+     * If is set to {@code true} then any write operation can be performed only in the thread which
+     * the transaction was created in. Default value is {@code false}.
+     * <p>Mutable at runtime: yes
+     *
+     * @param singleThreadWrites {@code true} then any write operation can be performed only in the thread which
+     *                           the transaction was created in
+     * @return this {@code EnvironmentConfig} instance
+     */
+    public EnvironmentConfig setEnvTxnSingleThreadWrites(final boolean singleThreadWrites) {
+        return setSetting(ENV_TXN_SINGLE_THREAD_WRITES, singleThreadWrites);
     }
 
     /**
@@ -1952,5 +2016,13 @@ public final class EnvironmentConfig extends AbstractConfig {
      */
     public EnvironmentConfig setManagementOperationsRestricted(final boolean operationsRestricted) {
         return setSetting(MANAGEMENT_OPERATIONS_RESTRICTED, operationsRestricted);
+    }
+
+    public EnvironmentConfig setMetaServer(final MetaServer metaServer) {
+        return setSetting(META_SERVER, metaServer);
+    }
+
+    public MetaServer getMetaServer() {
+        return (MetaServer) getSetting(META_SERVER);
     }
 }

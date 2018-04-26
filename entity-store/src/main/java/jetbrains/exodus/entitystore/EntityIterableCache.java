@@ -41,6 +41,8 @@ public final class EntityIterableCache {
     @NotNull
     private EntityIterableCacheAdapter cacheAdapter;
     @NotNull
+    private final EntityIterableCacheStatistics stats;
+    @NotNull
     private ObjectCacheBase<Object, Long> deferredIterablesCache;
     @NotNull
     private ObjectCacheBase<Object, Long> iterableCountsCache;
@@ -53,6 +55,7 @@ public final class EntityIterableCache {
         this.store = store;
         config = store.getConfig();
         cacheAdapter = new EntityIterableCacheAdapter(config);
+        stats = new EntityIterableCacheStatistics();
         clear();
         processor = new EntityStoreSharedAsyncProcessor(config.getEntityIterableCacheThreadCount());
         processor.start();
@@ -64,6 +67,10 @@ public final class EntityIterableCache {
         return cacheAdapter.hitRate();
     }
 
+    public EntityIterableCacheStatistics getStats() {
+        return stats;
+    }
+
     public int count() {
         return cacheAdapter.count();
     }
@@ -72,7 +79,7 @@ public final class EntityIterableCache {
         cacheAdapter.clear();
         final int cacheSize = config.getEntityIterableCacheSize();
         deferredIterablesCache = new ConcurrentObjectCache<>(cacheSize);
-        iterableCountsCache = new ConcurrentObjectCache<>(cacheSize * 4);
+        iterableCountsCache = new ConcurrentObjectCache<>(config.getEntityIterableCacheCountsCacheSize());
     }
 
     /**
@@ -94,10 +101,13 @@ public final class EntityIterableCache {
         if (cached != null) {
             if (!cached.getHandle().isExpired()) {
                 txn.localCacheHit();
+                stats.incTotalHits();
                 return cached;
             }
             localCache.remove(handle);
         }
+
+        stats.incTotalMisses();
 
         if (txn.isMutable() || !txn.isCurrent() || !txn.isCachingRelevant()) {
             return it;
@@ -142,7 +152,7 @@ public final class EntityIterableCache {
         }
         if (it.isThreadSafe() && !isCachingQueueFull()) {
             new EntityIterableAsyncInstantiation(handle, it, false).queue(
-                result == null ? Priority.normal : Priority.below_normal);
+                    result == null ? Priority.normal : Priority.below_normal);
         }
         return result == null ? -1 : result;
     }
@@ -173,11 +183,6 @@ public final class EntityIterableCache {
         return false;
     }
 
-    private String getStringPresentation(@NotNull final EntityIterableHandle handle) {
-        return config.getEntityIterableCacheUseHumanReadable() ?
-            EntityIterableBase.getHumanReadablePresentation(handle) : handle.toString();
-    }
-
     @SuppressWarnings({"EqualsAndHashcode"})
     private final class EntityIterableAsyncInstantiation extends Job {
 
@@ -195,6 +200,10 @@ public final class EntityIterableCache {
             this.handle = handle;
             cancellingPolicy = new CachingCancellingPolicy(isConsistent && handle.isConsistent());
             setProcessor(processor);
+            stats.incTotalJobsEnqueued();
+            if (!isConsistent) {
+                stats.incTotalCountJobs();
+            }
         }
 
         @Override
@@ -220,9 +229,11 @@ public final class EntityIterableCache {
         protected void execute() {
             final long started;
             if (isCachingQueueFull() || cancellingPolicy.isOverdue(started = System.currentTimeMillis())) {
+                stats.incTotalJobsNotStarted();
                 return;
             }
             Thread.yield();
+            stats.incTotalJobsStarted();
             store.executeInReadonlyTransaction(new StoreTransactionalExecutable() {
                 @Override
                 public void execute(@NotNull final StoreTransaction tx) {
@@ -240,7 +251,7 @@ public final class EntityIterableCache {
                             final long cachedIn = System.currentTimeMillis() - started;
                             if (cachedIn > 1000) {
                                 String action = cancellingPolicy.isConsistent ? "Cached" : "Cached (inconsistent)";
-                                logger.info(action + " in " + cachedIn + " ms, handle=" + getStringPresentation(handle));
+                                logger.info(action + " in " + cachedIn + " ms, handle=" + getStringPresentation(config, handle));
                             }
                         }
                     } catch (ReadonlyTransactionException rte) {
@@ -249,9 +260,10 @@ public final class EntityIterableCache {
                         logger.error(action + " failed with ReadonlyTransactionException. Re-queueing...");
                         queue(Priority.below_normal);
                     } catch (TooLongEntityIterableInstantiationException e) {
+                        stats.incTotalJobsInterrupted();
                         if (logger.isInfoEnabled()) {
                             final String action = cancellingPolicy.isConsistent ? "Caching" : "Caching (inconsistent)";
-                            logger.info(action + " forcedly stopped, " + e.reason.message + ": " + getStringPresentation(handle));
+                            logger.info(action + " forcedly stopped, " + e.reason.message + ": " + getStringPresentation(config, handle));
                         }
                     }
                 }
@@ -269,7 +281,8 @@ public final class EntityIterableCache {
         private CachingCancellingPolicy(final boolean isConsistent) {
             this.isConsistent = isConsistent;
             startTime = System.currentTimeMillis();
-            cachingTimeout = config.getEntityIterableCacheCachingTimeout();
+            cachingTimeout = isConsistent ?
+                    config.getEntityIterableCacheCachingTimeout() : config.getEntityIterableCacheCountsCachingTimeout();
         }
 
         private boolean isOverdue(final long currentMillis) {
@@ -340,5 +353,10 @@ public final class EntityIterableCache {
                 cache.cacheAdapter.adjustHitRate();
             }
         }
+    }
+
+    public static String getStringPresentation(@NotNull final PersistentEntityStoreConfig config, @NotNull final EntityIterableHandle handle) {
+        return config.getEntityIterableCacheUseHumanReadable() ?
+                EntityIterableBase.getHumanReadablePresentation(handle) : handle.toString();
     }
 }

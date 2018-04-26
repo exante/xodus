@@ -13,9 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package jetbrains.exodus.env.replication
+package jetbrains.exodus.log.replication
 
-import jetbrains.exodus.env.MetaTreePrototype
-import jetbrains.exodus.log.replication.LogReplicationDelta
+import jetbrains.exodus.log.Log
 
-interface EnvironmentReplicationDelta: LogReplicationDelta, MetaTreePrototype
+class NotEmptyLogWriterReplicationTest : NotEmptyLogReplicationTest() {
+
+    override fun Log.makeFileFactory(): FileFactory = S3ToWriterFileFactory(s3, bucket, extraHost)
+}

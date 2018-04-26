@@ -19,6 +19,7 @@ import jetbrains.exodus.ExodusException;
 import jetbrains.exodus.InvalidSettingException;
 import jetbrains.exodus.crypto.EnvKryptKt;
 import jetbrains.exodus.crypto.StreamCipherProvider;
+import jetbrains.exodus.io.Block;
 import jetbrains.exodus.io.DataReader;
 import jetbrains.exodus.io.DataWriter;
 import org.jetbrains.annotations.NotNull;
@@ -26,7 +27,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 
-class BufferedDataWriter {
+public class BufferedDataWriter {
 
     // immutable state
     @NotNull
@@ -81,8 +82,24 @@ class BufferedDataWriter {
     }
 
     @NotNull
-    LogFileSet.Mutable getFileSetMutable() {
+    public LogFileSet.Mutable getFileSetMutable() {
         return fileSetMutable;
+    }
+
+    public void setHighAddress(long highAddress) {
+        allocLastPage(log.getHighPageAddress(highAddress));
+        this.highAddress = highAddress;
+    }
+
+    public MutablePage allocLastPage(long pageAddress) {
+        MutablePage result = currentPage;
+        if (pageAddress == result.pageAddress) {
+            return result;
+        }
+
+        result = new MutablePage(null, logCache.allocPage(), pageAddress, 0);
+        currentPage = result;
+        return result;
     }
 
     void write(byte b) {
@@ -175,8 +192,16 @@ class BufferedDataWriter {
         return highAddress;
     }
 
-    void incHighAddress(long delta) {
+    public void incHighAddress(long delta) {
         this.highAddress += delta;
+    }
+
+    public void setLastPageLength(int lastPageLength) {
+        currentPage.setCounts(lastPageLength);
+    }
+
+    public int getLastPageLength() {
+        return currentPage.writtenCount;
     }
 
     long getLastWrittenFileLength(long fileLengthBound) {
@@ -195,12 +220,16 @@ class BufferedDataWriter {
         return new LogTip(currentPage.bytes, currentPage.pageAddress, currentPage.committedCount, highAddress, highAddress, fileSetImmutable);
     }
 
-    byte getByte(long address) {
+    byte getByte(long address, byte max) {
         final int offset = ((int) address) & (pageSize - 1);
         final long pageAddress = address - offset;
-        final byte[] page = getWrittenPage(pageAddress);
+        final MutablePage page = getWrittenPage(pageAddress);
         if (page != null) {
-            return page[offset];
+            final byte result = (byte) (page.bytes[offset] ^ 0x80);
+            if (result < 0 || result > max) {
+                throw new IllegalStateException("Unknown written page loggable type: " + result);
+            }
+            return result;
         }
 
         // slow path: unconfirmed file saved to disk, read byte from it
@@ -208,20 +237,34 @@ class BufferedDataWriter {
         if (!fileSetMutable.contains(fileAddress)) {
             BlockNotFoundException.raise("Address is out of log space, underflow", log, address);
         }
-        byte[] output = new byte[1];
 
-        reader.getBlock(fileAddress).read(output, address - fileAddress, 1);
+        final byte[] output = new byte[pageSize];
 
-        return output[0];
+        final Block block = reader.getBlock(fileAddress);
+        final int readBytes = block.read(output, pageAddress - fileAddress, output.length);
+
+        if (readBytes < offset) {
+            throw new ExodusException("Can't read expected page bytes");
+        }
+
+        if (cipherProvider != null) {
+            EnvKryptKt.cryptBlocksMutable(cipherProvider, cipherKey, cipherBasicIV, pageAddress, output, 0, readBytes, LogUtil.LOG_BLOCK_ALIGNMENT);
+        }
+
+        final byte result = (byte) (output[offset] ^ 0x80);
+        if (result < 0 || result > max) {
+            throw new IllegalStateException("Unknown written file loggable type: " + result + ", address: " + address);
+        }
+        return result;
     }
 
     // warning: this method is O(N), where N is number of added pages
-    private byte[] getWrittenPage(long alignedAddress) {
+    private MutablePage getWrittenPage(long alignedAddress) {
         MutablePage currentPage = this.currentPage;
         do {
             final long highPageAddress = currentPage.pageAddress;
             if (alignedAddress == highPageAddress) {
-                return currentPage.bytes;
+                return currentPage;
             }
             currentPage = currentPage.previousPage;
         } while (currentPage != null);
@@ -233,7 +276,7 @@ class BufferedDataWriter {
         return this.currentPage = new MutablePage(currentPage, logCache.allocPage(), currentPage.pageAddress + pageSize, 0);
     }
 
-    private static class MutablePage {
+    public static class MutablePage {
 
         @Nullable
         MutablePage previousPage;
@@ -248,6 +291,18 @@ class BufferedDataWriter {
             this.previousPage = previousPage;
             this.bytes = page;
             this.pageAddress = pageAddress;
+            flushedCount = committedCount = writtenCount = count;
+        }
+
+        public byte[] getBytes() {
+            return bytes;
+        }
+
+        public int getCount() {
+            return writtenCount;
+        }
+
+        void setCounts(final int count) {
             flushedCount = committedCount = writtenCount = count;
         }
     }

@@ -15,6 +15,7 @@
  */
 package jetbrains.exodus.log;
 
+import jetbrains.exodus.core.dataStructures.hash.LongIterator;
 import org.jetbrains.annotations.NotNull;
 
 public class LogTip {
@@ -29,24 +30,24 @@ public class LogTip {
     public final long approvedHighAddress;
 
     @NotNull
-    public final LogFileSet.Immutable logFileSet;
+    final LogFileSet.Immutable logFileSet;
 
     // empty
-    LogTip(final long fileSize) {
-        this(fileSize, 0, 0);
+    LogTip(final long fileLengthBound) {
+        this(fileLengthBound, 0, 0);
     }
 
     // fake page for closed log "residual state" info
-    LogTip(final long fileSize, final long pageAddress, final long highAddress) {
+    LogTip(final long fileLengthBound, final long pageAddress, final long highAddress) {
         this.bytes = NO_BYTES;
         this.pageAddress = pageAddress;
         this.count = -1;
         this.highAddress = this.approvedHighAddress = highAddress;
-        this.logFileSet = new LogFileSet.Immutable(fileSize); // no files
+        this.logFileSet = new LogFileSet.Immutable(fileLengthBound); // no files
     }
 
     // non-empty
-    public LogTip(@NotNull byte[] bytes, long pageAddress, int count, long highAddress, long approvedHighAddress, @NotNull final LogFileSet.Immutable logFileSet) {
+    LogTip(@NotNull byte[] bytes, long pageAddress, int count, long highAddress, long approvedHighAddress, @NotNull final LogFileSet.Immutable logFileSet) {
         this.bytes = bytes;
         this.pageAddress = pageAddress;
         this.count = count;
@@ -61,5 +62,13 @@ public class LogTip {
 
     LogTip withResize(int updatedCount, long updatedHighAddress, long updatedApprovedHighAddress, @NotNull final LogFileSet.Immutable logFileSet) {
         return new LogTip(bytes, pageAddress, updatedCount, updatedHighAddress, updatedApprovedHighAddress, logFileSet);
+    }
+
+    public long[] getAllFiles() {
+        return logFileSet.getFiles();
+    }
+
+    public LongIterator getFilesFrom(final long highAddress) {
+        return logFileSet.getFilesFrom(highAddress);
     }
 }

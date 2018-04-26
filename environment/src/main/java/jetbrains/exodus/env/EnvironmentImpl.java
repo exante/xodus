@@ -1,12 +1,12 @@
 /**
  * Copyright 2010 - 2018 JetBrains s.r.o.
- * <p>
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * <p>
+ *
  * http://www.apache.org/licenses/LICENSE-2.0
- * <p>
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,6 +21,7 @@ import jetbrains.exodus.backup.BackupStrategy;
 import jetbrains.exodus.core.dataStructures.ObjectCacheBase;
 import jetbrains.exodus.core.dataStructures.Pair;
 import jetbrains.exodus.crypto.StreamCipherProvider;
+import jetbrains.exodus.entitystore.MetaServer;
 import jetbrains.exodus.env.management.EnvironmentConfigWithOperations;
 import jetbrains.exodus.gc.GarbageCollector;
 import jetbrains.exodus.gc.UtilizationProfile;
@@ -62,7 +63,7 @@ public class EnvironmentImpl implements Environment {
     @NotNull
     private final EnvironmentConfig ec;
     private BTreeBalancePolicy balancePolicy;
-    private MetaTree metaTree;
+    private MetaTreeImpl metaTree;
     private final AtomicInteger structureId;
     @NotNull
     private final ProcessCoordinator coordinator;
@@ -108,16 +109,16 @@ public class EnvironmentImpl implements Environment {
         this.log = log;
         this.ec = ec;
         applyEnvironmentSettings(log.getLocation(), ec);
-        final Pair<MetaTree, Integer> meta;
+        final Pair<MetaTreeImpl, Integer> meta;
         synchronized (commitLock) {
-            meta = MetaTree.create(this);
+            meta = MetaTreeImpl.create(this);
         }
         metaTree = meta.getFirst();
         structureId = new AtomicInteger(meta.getSecond());
         coordinator = log.getCoordinator();
-        try {
-            coordinator.withHighestRootLock(new Function0<Unit>() {
-                @Override
+        try{
+                coordinator.withHighestRootLock(new Function0<Unit>() {
+                    @Override
                 public Unit invoke() {
                     if (coordinator.getHighestRoot() == null) {
                         final Pair<MetaTree, Integer> meta = MetaTree.create(EnvironmentImpl.this);
@@ -147,17 +148,17 @@ public class EnvironmentImpl implements Environment {
             txnDispatcher = new ReentrantTransactionDispatcher(ec.getEnvMaxParallelTxns());
             roTxnDispatcher = new ReentrantTransactionDispatcher(ec.getEnvMaxParallelReadonlyTxns());
 
-            statistics = new EnvironmentStatistics(this);
-            if (ec.isManagementEnabled()) {
-                configMBean = ec.getManagementOperationsRestricted() ?
-                        new jetbrains.exodus.env.management.EnvironmentConfig(this) :
-                        new EnvironmentConfigWithOperations(this);
-                // if we don't gather statistics then we should not expose corresponding managed bean
-                statisticsMBean = ec.getEnvGatherStatistics() ? new jetbrains.exodus.env.management.EnvironmentStatistics(this) : null;
-            } else {
-                configMBean = null;
-                statisticsMBean = null;
-            }
+        statistics = new EnvironmentStatistics(this);
+        if (ec.isManagementEnabled()) {
+            configMBean = ec.getManagementOperationsRestricted() ?
+                new jetbrains.exodus.env.management.EnvironmentConfig(this) :
+                new EnvironmentConfigWithOperations(this);
+            // if we don't gather statistics then we should not expose corresponding managed bean
+            statisticsMBean = ec.getEnvGatherStatistics() ? new jetbrains.exodus.env.management.EnvironmentStatistics(this) : null;
+        } else {
+            configMBean = null;
+            statisticsMBean = null;
+        }
 
             throwableOnCommit = null;
             throwableOnClose = null;
@@ -262,7 +263,7 @@ public class EnvironmentImpl implements Environment {
     @Override
     public TransactionBase beginReadonlyTransaction(final Runnable beginHook) {
         checkIsOperative();
-        return new ReadonlyTransaction(this, beginHook);
+        return new ReadonlyTransaction(this, false, beginHook);
     }
 
     @NotNull
@@ -378,7 +379,7 @@ public class EnvironmentImpl implements Environment {
                                     log.clear();
                                     invalidateStoreGetCache();
                                     throwableOnCommit = null;
-                                    final Pair<MetaTree, Integer> meta = MetaTree.create(EnvironmentImpl.this);
+                                    final Pair<MetaTreeImpl, Integer> meta = MetaTreeImpl.create(EnvironmentImpl.this);
                                     metaTree = meta.getFirst();
                                     structureId.set(meta.getSecond());
                                     coordinator.setHighestRoot(log.getTip().approvedHighAddress);
@@ -411,6 +412,10 @@ public class EnvironmentImpl implements Environment {
             if (!isOpen()) {
                 return;
             }
+        }
+        final MetaServer metaServer = getEnvironmentConfig().getMetaServer();
+        if (metaServer != null) {
+            metaServer.stop(this);
         }
         if (configMBean != null) {
             configMBean.unregister();
@@ -614,12 +619,12 @@ public class EnvironmentImpl implements Environment {
     protected TransactionBase beginTransaction(Runnable beginHook, boolean exclusive, boolean cloneMeta) {
         checkIsOperative();
         return ec.getEnvIsReadonly() ?
-                new ReadonlyTransaction(this, beginHook) :
-                new ReadWriteTransaction(this, beginHook, exclusive, cloneMeta);
+            new ReadonlyTransaction(this, exclusive, beginHook) :
+            new ReadWriteTransaction(this, beginHook, exclusive, cloneMeta);
     }
 
     long getDiskUsage() {
-        return IOUtil.getDirectorySize(new File(getLocation()), LogUtil.LOG_FILE_EXTENSION, false);
+        return log.getDiskUsage();
     }
 
     void acquireTransaction(@NotNull final TransactionBase txn) {
@@ -639,7 +644,7 @@ public class EnvironmentImpl implements Environment {
     boolean shouldTransactionBeExclusive(@NotNull final ReadWriteTransaction txn) {
         final int replayCount = txn.getReplayCount();
         return replayCount >= ec.getEnvTxnReplayMaxCount() ||
-                System.currentTimeMillis() - txn.getCreated() >= ec.getEnvTxnReplayTimeout();
+            System.currentTimeMillis() - txn.getCreated() >= ec.getEnvTxnReplayTimeout();
     }
 
     /**
@@ -713,7 +718,7 @@ public class EnvironmentImpl implements Environment {
                 final LogTip logTip = log.beginWrite();
                 initialHighAddress = logTip.highAddress;
                 try {
-                    final MetaTree.Proto[] tree = new MetaTree.Proto[1];
+                    final MetaTreeImpl.Proto[] tree = new MetaTreeImpl.Proto[1];
                     expiredLoggables = coordinator.withHighestRootLock(new Function0<Iterable<ExpiredLoggableInfo>[]>() {
                         @Override
                         public Iterable<ExpiredLoggableInfo>[] invoke() {
@@ -722,15 +727,14 @@ public class EnvironmentImpl implements Environment {
                             // but it's quite difficult to resolve all possible inconsistencies afterwards,
                             // so think twice before removing the following line
                             log.flush();
-                            final MetaTree.Proto proto = tree[0];
+                            final MetaTreeImpl.Proto proto = tree[0];
                             metaWriteLock.lock();
                             try {
                                 final LogTip updatedTip = log.endWrite();
-                                txn.setMetaTree(metaTree = MetaTree.create(EnvironmentImpl.this, updatedTip, proto));
+                                txn.setMetaTree(metaTree = MetaTreeImpl.create(EnvironmentImpl.this, updatedTip, proto));
                                 coordinator.setHighestRoot(log.getTip().approvedHighAddress);
                                 coordinator.setHighestMetaTreeRoot(metaTree.root);
-                                txn.setMetaTree(metaTree);
-                                txn.executeCommitHook();
+                               txn.executeCommitHook();
                             } finally {
                                 metaWriteLock.unlock();
                             }
@@ -742,9 +746,7 @@ public class EnvironmentImpl implements Environment {
                 } catch (Throwable t) { // pokemon exception handling to decrease try/catch block overhead
                     loggerError("Failed to flush transaction", t);
                     try {
-                        log.abortWrite();
-                        log.setHighAddress(logTip, initialHighAddress);
-                        //log.approveHighAddress();
+                        log.revertWrite(logTip);
                     } catch (Throwable th) {
                         throwableOnCommit = t; // inoperative on failing to update high address
                         loggerError("Failed to rollback high address", th);
@@ -768,11 +770,11 @@ public class EnvironmentImpl implements Environment {
         return true;
     }
 
-    MetaTree holdNewestSnapshotBy(@NotNull final TransactionBase txn) {
+    MetaTreeImpl holdNewestSnapshotBy(@NotNull final TransactionBase txn) {
         return holdNewestSnapshotBy(txn, true);
     }
 
-    MetaTree holdNewestSnapshotBy(@NotNull final TransactionBase txn, final boolean acquireTxn) {
+    MetaTreeImpl holdNewestSnapshotBy(@NotNull final TransactionBase txn, final boolean acquireTxn) {
         if (acquireTxn) {
             acquireTransaction(txn);
         }
@@ -818,12 +820,21 @@ public class EnvironmentImpl implements Environment {
         structureId.set(meta.getSecond());
     }
 
-    MetaTree getMetaTree() {
+    public MetaTree getMetaTree() {
+        metaReadLock.lock();
+        try {
+            return metaTree;
+        } finally {
+            metaReadLock.unlock();
+        }
+    }
+
+    MetaTreeImpl getMetaTreeInternal() {
         return metaTree;
     }
 
     // unsafe
-    void setMetaTree(MetaTree metaTree) {
+    void setMetaTreeInternal(MetaTreeImpl metaTree) {
         this.metaTree = metaTree;
     }
 
@@ -866,12 +877,12 @@ public class EnvironmentImpl implements Environment {
             final boolean hasDuplicates = metaInfo.hasDuplicates();
             if (hasDuplicates != config.duplicates) {
                 throw new ExodusException("Attempt to open store '" + name + "' with duplicates = " +
-                        config.duplicates + " while it was created with duplicates =" + hasDuplicates);
+                    config.duplicates + " while it was created with duplicates =" + hasDuplicates);
             }
             if (metaInfo.isKeyPrefixing() != config.prefixing) {
                 if (!config.prefixing) {
                     throw new ExodusException("Attempt to open store '" + name +
-                            "' with prefixing = false while it was created with prefixing = true");
+                        "' with prefixing = false while it was created with prefixing = true");
                 }
                 // if we're trying to open existing store with prefixing which actually wasn't created as store
                 // with prefixing due to lack of the PatriciaTree feature, then open store with existing config
@@ -951,7 +962,7 @@ public class EnvironmentImpl implements Environment {
         }
         synchronized (commitLock) {
             log.setHighAddress(log.getTip(), highAddress);
-            final Pair<MetaTree, Integer> meta = MetaTree.create(this);
+            final Pair<MetaTreeImpl, Integer> meta = MetaTreeImpl.create(this);
             metaWriteLock.lock();
             try {
                 metaTree = meta.getFirst();
@@ -1051,7 +1062,7 @@ public class EnvironmentImpl implements Environment {
     private void reportAliveTransactions(final boolean debug) {
         if (transactionTimeout() == 0) {
             String stacksUnavailable = "Transactions stack traces are not available, " +
-                    "set \'" + EnvironmentConfig.ENV_MONITOR_TXNS_TIMEOUT + " > 0\'";
+                "set \'" + EnvironmentConfig.ENV_MONITOR_TXNS_TIMEOUT + " > 0\'";
             if (debug) {
                 logger.debug(stacksUnavailable);
             } else {
@@ -1127,8 +1138,8 @@ public class EnvironmentImpl implements Environment {
             while (true) {
                 executable.execute(txn);
                 if (txn.isReadonly() || // txn can be read-only if Environment is in read-only mode
-                        txn.isFinished() || // txn can be finished if, e.g., it was aborted within executable
-                        txn.flush()) {
+                    txn.isFinished() || // txn can be finished if, e.g., it was aborted within executable
+                    txn.flush()) {
                     break;
                 }
                 txn.revert();
@@ -1144,8 +1155,8 @@ public class EnvironmentImpl implements Environment {
             while (true) {
                 final T result = computable.compute(txn);
                 if (txn.isReadonly() || // txn can be read-only if Environment is in read-only mode
-                        txn.isFinished() || // txn can be finished if, e.g., it was aborted within computable
-                        txn.flush()) {
+                    txn.isFinished() || // txn can be finished if, e.g., it was aborted within computable
+                    txn.flush()) {
                     return result;
                 }
                 txn.revert();

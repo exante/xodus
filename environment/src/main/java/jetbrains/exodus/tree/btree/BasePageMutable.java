@@ -42,7 +42,7 @@ abstract class BasePageMutable extends BasePage implements MutableTreeRoot {
         size = page.size;
         createChildren(Math.max(page.size, getBalancePolicy().getPageMaxSize()));
         if (size > 0) {
-            load(page.getDataIterator(0), page.keyAddressLen);
+            load(page.getDataIterator(), page.keyAddressLen);
         }
     }
 
@@ -119,7 +119,7 @@ abstract class BasePageMutable extends BasePage implements MutableTreeRoot {
         final Log log = tree.log;
         if (flag == ReclaimFlag.PRESERVE) {
             // there is a chance to update the flag to RECLAIM
-            if (log.getWrittenHighAddress() % log.getFileSize() == 0) {
+            if (log.getWrittenHighAddress() % log.getFileLengthBound() == 0) {
                 // page will be exactly on file border
                 flag = ReclaimFlag.RECLAIM;
             } else {

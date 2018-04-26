@@ -16,9 +16,7 @@
 package jetbrains.exodus.log.replication
 
 import jetbrains.exodus.ExodusException
-import jetbrains.exodus.env.replication.ReplicationDelta
 import jetbrains.exodus.log.Log
-import jetbrains.exodus.log.LogFileSet
 import jetbrains.exodus.log.LogTip
 import mu.KLogging
 import org.jetbrains.annotations.NotNull
@@ -27,11 +25,14 @@ object LogAppender : KLogging() {
 
     @JvmStatic
     @JvmOverloads
-    fun appendLog(log: Log, delta: ReplicationDelta, fileFactory: FileFactory, currentTip: LogTip = log.beginWrite()): () -> LogTip {
+    fun appendLog(log: Log, delta: LogReplicationDelta, fileFactory: FileFactory, currentTip: LogTip = log.beginWrite()): () -> LogTip {
         try {
             checkPreconditions(log, currentTip, delta)
 
             val highAddress = delta.highAddress
+            if (highAddress < delta.startAddress) {
+                throw IllegalArgumentException("Cannot decrease high address")
+            }
             if (delta.files.isEmpty()) {
                 // truncate log
                 log.abortWrite()
@@ -45,35 +46,22 @@ object LogAppender : KLogging() {
                     // current file has been deleted, just pad it with nulls to respect log constraints
                     log.padWithNulls()
                 }
-                log.abortWrite() // even if we did padWithNulls, the file is not truncated by this abortWrite
 
-                val lastPage = ByteArray(log.cachePageSize)
-                val fileSet = currentTip.logFileSet.beginWrite()
+                writeFiles(log, currentTip, delta, fileFactory)
 
-                val lastFileWrite = writeFiles(log, currentTip, delta, fileFactory, lastPage, fileSet)
-
-                val count = lastFileWrite.lastPageWritten
-                val result = LogTip(
-                        lastPage,
-                        highAddress - count,
-                        count,
-                        highAddress, highAddress,
-                        fileSet.endWrite()
-                )
                 return {
-                    log.compareAndSetTip(currentTip, result)
+                    log.endWrite()
                 }
             }
         } catch (t: Throwable) {
-            log.abortWrite()
-            log.setHighAddress(currentTip, currentTip.highAddress) // rollback potential padding
+            log.revertWrite(currentTip) // rollback potential padding and created files
 
             throw ExodusException.toExodusException(t, "Failed to replicate log")
         }
     }
 
-    private fun checkPreconditions(log: @NotNull Log, currentTip: LogTip, delta: ReplicationDelta) {
-        if (delta.startAddress != currentTip.highAddress || delta.fileSize != log.fileSize) {
+    private fun checkPreconditions(log: @NotNull Log, currentTip: LogTip, delta: LogReplicationDelta) {
+        if (delta.startAddress != currentTip.highAddress || delta.fileLengthBound != log.fileLengthBound) {
             throw IllegalArgumentException("Non-matching replication delta")
         }
     }
@@ -81,12 +69,10 @@ object LogAppender : KLogging() {
     private fun writeFiles(
             log: Log,
             currentTip: LogTip,
-            delta: ReplicationDelta,
-            fileFactory: FileFactory,
-            lastPage: ByteArray,
-            fileSet: LogFileSet.Mutable
-    ): WriteResult {
-        val fileSize = log.fileSize
+            delta: LogReplicationDelta,
+            fileFactory: FileFactory
+    ) {
+        val fileSize = log.fileLengthBound
 
         val lastFile = log.getFileAddress(delta.highAddress)
 
@@ -94,31 +80,51 @@ object LogAppender : KLogging() {
 
         var prevAddress = log.getFileAddress(currentTip.highAddress)
 
+        var allWritten = 0L
+
         for (file in delta.files) {
-            if (file <= prevAddress) {
+            if (file < prevAddress) {
                 throw IllegalStateException("Incorrect file order")
+            }
+            val startingLength = if (file == prevAddress) {
+                currentTip.highAddress - prevAddress
+            } else {
+                0L
             }
             prevAddress = file
 
             val atLastFile = file == lastFile
             val expectedLength = if (atLastFile) {
-                delta.highAddress - lastFile
+                delta.highAddress - file
             } else {
                 fileSize
             }
 
-            val created = fileFactory.fetchFile(file, lastPage.takeIf { atLastFile })
+            val useLastPage = atLastFile && expectedLength != fileSize
+            log.ensureWriter().setHighAddress(file + startingLength) // jump to the file
+            val created = fileFactory.fetchFile(log, file, startingLength, expectedLength, useLastPage)
 
-            if (created.written != expectedLength) {
-                throw IllegalStateException("Fetched fewer bytes than expected")
+            if (created.written != (expectedLength - startingLength)) {
+                throw IllegalStateException("Fetched unexpected bytes")
             }
 
-            fileSet.add(file)
+            if (created.written == 0L) {
+                return
+            }
+
+            allWritten += created.written
+
+            if (useLastPage && (delta.highAddress - log.getHighPageAddress(delta.highAddress) != created.lastPageLength.toLong())) {
+                throw IllegalStateException("Fetched unexpected last page bytes")
+            }
 
             if (atLastFile) {
                 lastFileWrite = created
             }
         }
-        return lastFileWrite ?: throw IllegalArgumentException("Last file is not provided")
+        if (lastFileWrite == null) {
+            throw IllegalArgumentException("Last file is not provided")
+        }
+        logger.debug { "Appended $allWritten bytes to log at ${log.location}" }
     }
 }

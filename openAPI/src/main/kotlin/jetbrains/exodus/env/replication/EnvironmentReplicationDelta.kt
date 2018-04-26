@@ -13,11 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package jetbrains.exodus.log.replication
+package jetbrains.exodus.env.replication
 
-interface LogReplicationDelta {
-    val startAddress: Long
-    val highAddress: Long
-    val fileSize: Long
-    val files: LongArray
+import jetbrains.exodus.log.replication.LogReplicationDelta
+
+interface EnvironmentReplicationDelta : LogReplicationDelta {
+    val id: Long
+    val metaTreeAddress: Long
+    val rootAddress: Long
+    val encrypted: Boolean
 }

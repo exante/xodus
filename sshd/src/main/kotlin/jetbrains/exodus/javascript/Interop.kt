@@ -19,9 +19,9 @@ import jetbrains.exodus.entitystore.Entity
 import jetbrains.exodus.entitystore.PersistentEntityId
 import jetbrains.exodus.entitystore.PersistentEntityStoreImpl
 import jetbrains.exodus.entitystore.PersistentEntityStores
-import jetbrains.exodus.env.EnvironmentConfig
 import jetbrains.exodus.env.EnvironmentImpl
 import jetbrains.exodus.env.Environments
+import jetbrains.exodus.env.newEnvironmentConfig
 import jetbrains.exodus.kotlin.notNull
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.NativeJavaObject
@@ -65,17 +65,18 @@ class Interop(private val rhinoCommand: RhinoCommand,
 
     val store: PersistentEntityStoreImpl? get() = entityStore
 
-    val promptString: String get() {
-        val env = environment
-        if (env != null) {
-            return env.location + '>'
+    val promptString: String
+        get() {
+            val env = environment
+            if (env != null) {
+                return env.location + '>'
+            }
+            val store = entityStore
+            if (store != null) {
+                return store.location + '>'
+            }
+            return ">"
         }
-        val store = entityStore
-        if (store != null) {
-            return store.location + '>'
-        }
-        return ">"
-    }
 
     fun gc(on: Any?): Interop {
         val env = environment ?: return println("Environment is not open.")
@@ -107,7 +108,7 @@ class Interop(private val rhinoCommand: RhinoCommand,
 
     fun getEntity(id: String): Entity {
         val store = store.notNull
-        return store.getEntity(PersistentEntityId.toEntityId(id, store))
+        return store.getEntity(PersistentEntityId.toEntityId(id))
     }
 
     internal fun newLine(): Interop = output.print("\n\r").run { flushOutput() }
@@ -174,6 +175,6 @@ class Interop(private val rhinoCommand: RhinoCommand,
 
         private val Any?.isUndefinedOrNull: Boolean get() = this == null || this == "undefined"
 
-        private val envConfig = EnvironmentConfig().setEnvCloseForcedly(true)
+        private val envConfig = newEnvironmentConfig { envCloseForcedly = true }
     }
 }
