@@ -241,6 +241,25 @@ final class MetaTreeImpl implements MetaTree {
         return key.getBytesUnsafe()[key.getLength() - 1] == 0;
     }
 
+    static Pair<MetaTreeImpl, Integer> loadTree(@NotNull final EnvironmentImpl env, final long root) {
+        final Log log = env.getLog();
+        final Loggable rootLoggable = log.read(root);
+        final DatabaseRoot dbRoot = new DatabaseRoot(rootLoggable);
+        if (!dbRoot.isValid()) {
+            throw new ExodusException("Database root is not valid");
+        }
+        final long validHighAddress = root + dbRoot.length();
+        if (log.getHighAddress() != validHighAddress) {
+            throw new ExodusException("Log high address is not valid");
+        }
+        final BTree metaTree = env.loadMetaTree(dbRoot.getRootAddress(), log.getTip());
+        if (metaTree == null) {
+            throw new ExodusException("Failed to load meta tree");
+        }
+        return new Pair<>(new MetaTreeImpl(metaTree, root, log.getTip()), dbRoot.getLastStructureId());
+    }
+
+
     private static ITreeMutable cloneTree(@NotNull final ITree tree) {
         try (ITreeCursor cursor = tree.openCursor()) {
             final ITreeMutable result = tree.getMutableCopy();

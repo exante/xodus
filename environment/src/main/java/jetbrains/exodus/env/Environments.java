@@ -129,7 +129,7 @@ public final class Environments {
                 setFullFileReadonly(ec.isLogFullFileReadonly()).
                 setCipherProvider(ec.getCipherId() == null ? null : KryptKt.newCipherProvider(ec.getCipherId())).
                 setCipherKey(ec.getCipherKey()).
-                setCipherBasicIV(ec.getCipherBasicIV())).
+                setCipherBasicIV(ec.getCipherBasicIV()).
                 setLockType(ec.getLogLockType()));
     }
 

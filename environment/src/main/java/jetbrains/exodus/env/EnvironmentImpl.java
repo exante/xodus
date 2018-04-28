@@ -31,7 +31,6 @@ import jetbrains.exodus.tree.TreeMetaInfo;
 import jetbrains.exodus.tree.btree.BTree;
 import jetbrains.exodus.tree.btree.BTreeBalancePolicy;
 import jetbrains.exodus.util.DeferredIO;
-import jetbrains.exodus.util.IOUtil;
 import kotlin.Unit;
 import kotlin.jvm.functions.Function0;
 import kotlin.jvm.functions.Function1;
@@ -121,7 +120,7 @@ public class EnvironmentImpl implements Environment {
                     @Override
                 public Unit invoke() {
                     if (coordinator.getHighestRoot() == null) {
-                        final Pair<MetaTree, Integer> meta = MetaTree.create(EnvironmentImpl.this);
+                        final Pair<MetaTreeImpl, Integer> meta = MetaTreeImpl.create(EnvironmentImpl.this);
                         coordinator.setHighestRoot(log.getTip().approvedHighAddress);
                         coordinator.setHighestMetaTreeRoot(meta.getFirst().root);
                         metaTree = meta.getFirst();
@@ -779,9 +778,9 @@ public class EnvironmentImpl implements Environment {
             acquireTransaction(txn);
         }
 
-        return coordinator.withHighestRootLock(new Function0<MetaTree>() {
+        return coordinator.withHighestRootLock(new Function0<MetaTreeImpl>() {
             @Override
-            public MetaTree invoke() {
+            public MetaTreeImpl invoke() {
                 final Runnable beginHook = txn.getBeginHook();
                 metaReadLock.lock();
                 try {
@@ -811,11 +810,11 @@ public class EnvironmentImpl implements Environment {
     }
 
     private void resetHighAddress() {
-        log.setHighAddress(log.getTip(), coordinator.getHighestRoot(), false);
+        log.setHighAddress(log.getTip(), coordinator.getHighestRoot(), null);
 //        log.approveHighAddress();
 //        final Pair<MetaTree, Integer> meta = MetaTree.create(this);
-        final Pair<MetaTree, Integer> meta =
-                MetaTree.loadTree(EnvironmentImpl.this, coordinator.getHighestMetaTreeRoot());
+        final Pair<MetaTreeImpl, Integer> meta =
+                MetaTreeImpl.loadTree(this, coordinator.getHighestMetaTreeRoot());
         metaTree = meta.getFirst();
         structureId.set(meta.getSecond());
     }
@@ -976,7 +975,7 @@ public class EnvironmentImpl implements Environment {
                 @Override
                 public Unit invoke() {
                     log.setHighAddress(log.getTip(), highAddress);
-                    final Pair<MetaTree, Integer> meta = MetaTree.create(EnvironmentImpl.this);
+                    final Pair<MetaTreeImpl, Integer> meta = MetaTreeImpl.create(EnvironmentImpl.this);
                     metaWriteLock.lock();
                     try {
                         metaTree = meta.getFirst();

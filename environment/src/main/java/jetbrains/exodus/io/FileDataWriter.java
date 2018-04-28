@@ -35,7 +35,7 @@ public class FileDataWriter extends AbstractDataWriter {
 
     @NotNull
     private final File dir;
-    private final FileChannel dirChannel;
+    private FileChannel dirChannel;
     @Nullable
     private RandomAccessFile file;
 

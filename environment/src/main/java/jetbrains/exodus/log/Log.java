@@ -248,11 +248,11 @@ public final class Log implements Closeable {
     }
 
     public LogTip setHighAddress(final LogTip logTip, final long highAddress) {
-        return setHighAddress(logTip, highAddress, true);
+        return setHighAddress(logTip, highAddress, null);
     }
 
     @SuppressWarnings({"OverlyLongMethod"})
-    public LogTip setHighAddress(final LogTip logTip, final long highAddress, final LogFileSet fileSet, boolean truncate) {
+    public LogTip setHighAddress(final LogTip logTip, final long highAddress, final LogFileSet fileSet) {
         if (highAddress == logTip.highAddress) {
             if (bufferedWriter != null) {
                 throw new IllegalStateException("Unexpected write in progress");
@@ -282,14 +282,11 @@ public final class Log implements Closeable {
                 blocksToDelete.add(blockAddress);
             }
 
-            // truncate log
-            if (truncate) {
-                for (int i = 0; i < blocksToDelete.size(); ++i) {
-                    removeFile(blocksToDelete.get(i), RemoveBlockType.Delete, fileSetMutable);
-                }
-                if (blockToTruncate >= 0) {
-                    truncateFile(blockToTruncate, highAddress - blockToTruncate);
-                }
+            for (int i = 0; i < blocksToDelete.size(); ++i) {
+                removeFile(blocksToDelete.get(i), RemoveBlockType.Delete, fileSetMutable);
+            }
+            if (blockToTruncate >= 0) {
+                truncateFile(blockToTruncate, highAddress - blockToTruncate);
             }
         } else {
             final long oldLastFileAddress = getHighFileAddress();
@@ -723,7 +720,7 @@ public final class Log implements Closeable {
         sync();
         reader.close();
         closeWriter();
-        compareAndSetTip(logTip, new LogTip(fileSize, logTip.pageAddress, logTip.highAddress));
+        compareAndSetTip(logTip, new LogTip(fileLengthBound, logTip.pageAddress, logTip.highAddress));
         baseWriter.close();
         coordinator.close();
     }
