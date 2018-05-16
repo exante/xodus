@@ -81,7 +81,7 @@ class LogTestsBase {
                 if (log == null) {
                     config.setReader(reader);
                     config.setWriter(writer);
-                    log = new Log(config, new DummyProcessCoordinator());
+                    log = new Log(config);
                 }
             }
         }
