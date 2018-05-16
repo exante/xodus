@@ -82,7 +82,6 @@ public abstract class TreeBaseTest {
         LogConfig config = createLogConfig();
         config.setDir(tempFolder);
         log = new Log(config, new DummyProcessCoordinator());
-        log.init();
     }
 
     protected LogConfig createLogConfig() {

@@ -90,6 +90,10 @@ public final class Log implements Closeable {
     private LogTestConfig testConfig;
 
     public Log(@NotNull final LogConfig config) {
+        this(config, null);
+    }
+
+    public Log(@NotNull final LogConfig config, @Nullable final ProcessCoordinator processCoordinator) {
         this.config = config;
         baseWriter = config.getWriter();
 //        tryLock();
@@ -104,7 +108,7 @@ public final class Log implements Closeable {
         reader = config.getReader();
         reader.setLog(this);
         location = reader.getLocation();
-        coordinator = config.newProcessCoordinator(config.getLockTimeout(), config.getLockType());
+        coordinator = processCoordinator == null? config.newProcessCoordinator(config.getLockTimeout(), config.getLockType()) : processCoordinator;
         checkLogConsistency(fileSetMutable);
 
         final LogFileSet.Immutable fileSetImmutable = fileSetMutable.endWrite();
