@@ -18,6 +18,7 @@ package jetbrains.exodus.entitystore.concurrent
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.KotlinModule
+import jetbrains.exodus.ConfigurationStrategy
 import jetbrains.exodus.entitystore.*
 import jetbrains.exodus.env.EnvironmentConfig
 import jetbrains.exodus.env.Environments
@@ -144,7 +145,9 @@ class StoreService(location: String, key: String?, lockType: StoreLockType, read
 
     init {
         try {
-            val config = EnvironmentConfig().setEnvIsReadonly(readonly).setLogLockType(lockType.code)
+            val config = EnvironmentConfig(ConfigurationStrategy.IGNORE)
+                    .setEnvIsReadonly(readonly)
+                    .setLogLockType(lockType.code)
             val environment = Environments.newInstance(location, config)
             store = key.let {
                 if (it == null) {
