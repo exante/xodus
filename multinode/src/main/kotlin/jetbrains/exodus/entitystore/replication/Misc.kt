@@ -56,6 +56,7 @@ fun SdkAsyncHttpClient.postRequest(path: String, params: Map<String, String>, ho
             sdkRequestContext,
             EmptyRequestProvider,
             object : SdkHttpResponseHandler<Any> {
+
                 private lateinit var baos: ByteArrayOutputStream
 
                 override fun headersReceived(response: SdkHttpResponse) {
