@@ -370,12 +370,13 @@ public class PersistentEntityStoreImpl implements PersistentEntityStore, FlushLo
                     throw ExodusException.toEntityStoreException(e);
                 }
             }
-            if (blobVault instanceof DiskBasedBlobVault && Settings.get(internalSettings, "Blob file lengths cached") == null) {
-                if (fromScratch || Settings.get(internalSettings, "Blob file lengths cached") == null) {
+            if (blobVault instanceof DiskBasedBlobVault) {
+                if (fromScratch || Settings.get(internalSettings, "refactorBlobFileLengths() applied") == null) {
                     if (!fromScratch) {
+                        Settings.delete(internalSettings, "Blob file lengths cached"); // don't waste space
                         refactorings.refactorBlobFileLengths();
                     }
-                    Settings.set(internalSettings, "Blob file lengths cached", "y");
+                    Settings.set(internalSettings, "refactorBlobFileLengths() applied", "y");
                 }
             }
         } finally {
@@ -470,7 +471,7 @@ public class PersistentEntityStoreImpl implements PersistentEntityStore, FlushLo
                 if (settings == null || blobFileLengths == null) {
                     return Collections.emptyList();
                 }
-                if (Settings.get(settings, "Blob file lengths cached") == null) {
+                if (Settings.get(settings, "refactorBlobFileLengths() applied") == null) {
                     throw new IllegalStateException("Cannot replicate blobs without serialized blob list");
                 }
 
