@@ -134,7 +134,7 @@ public final class PropertiesTable extends Table {
             if (valueIndex == null) {
                 final Transaction envTxn = txn.getEnvironmentTransaction();
                 valueIndex = envTxn.getEnvironment().openStore(
-                        valueIndexName(propertyId), StoreConfig.WITH_DUPLICATES, envTxn, creationRequired);
+                    valueIndexName(propertyId), StoreConfig.WITH_DUPLICATES_WITH_PREFIXING, envTxn, creationRequired);
                 if (valueIndex != null && !valueIndex.getConfig().temporaryEmpty) {
                     store.trackTableCreation(valueIndex, txn);
                     valueIndexes.put(propertyId, valueIndex);
