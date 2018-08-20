@@ -109,6 +109,10 @@ public class FileDataWriter extends AbstractDataWriter {
         try {
             file.close();
             this.file = null;
+            if (this.dirChannel != null) {
+                //File descriptors leaking fix
+                this.dirChannel.close();
+            }
         } catch (IOException e) {
             throw new ExodusException("Can't close FileDataWriter", e);
         }
